@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 30
 
     steps:
@@ -27,13 +27,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Rebuild node-pty (native)
-        env:
-          npm_config_build_from_source: "true"
-        run: pnpm rebuild node-pty
-
       - name: Install Playwright browsers
-        run: pnpm -C apps/dashboard exec playwright install --with-deps chromium
+        run: pnpm -C apps/dashboard exec playwright install chromium
 
       - name: Run tests
         env:
