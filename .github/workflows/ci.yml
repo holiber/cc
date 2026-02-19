@@ -9,6 +9,9 @@ jobs:
   test:
     runs-on: macos-latest
     timeout-minutes: 30
+    env:
+      # Store Playwright browser binaries in a cacheable directory.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
 
     steps:
       - name: Checkout
@@ -18,11 +21,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: latest
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: ${{ runner.os }}-playwright-browsers-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-browsers-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
