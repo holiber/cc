@@ -509,6 +509,28 @@ function mapPayloadMessage(doc: any): UiMessage | null {
     };
 }
 
+function extractMeUser(meJson: any): { id: string; role: string } | null {
+    const candidates = [
+        meJson?.user,
+        meJson?.user?.user,
+        meJson,
+        meJson?.doc,
+        meJson?.data?.user,
+    ];
+
+    for (const c of candidates) {
+        if (!c || typeof c !== "object") continue;
+        const rawId = (c as any).id ?? (c as any)._id;
+        if (rawId) {
+            return {
+                id: String(rawId),
+                role: String((c as any).role ?? ""),
+            };
+        }
+    }
+    return null;
+}
+
 export default function MessagesPage() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterTab>("all");
@@ -524,13 +546,20 @@ export default function MessagesPage() {
         setLoading(true);
         try {
             const meRes = await fetch("/api/users/me", { credentials: "include" });
-            if (!meRes.ok) throw new Error(`Failed to load /api/users/me: ${meRes.status}`);
-            const meJson: any = await meRes.json();
-            const meUser = meJson?.user ?? meJson;
-            const userId = meUser?.id;
-            const role = meUser?.role;
-            if (!userId) throw new Error("No user id in /api/users/me response");
-            setMe({ id: String(userId), role: String(role ?? "") });
+            if (!meRes.ok) {
+                setMe(null);
+                setMessages([]);
+                return;
+            }
+            const meJson: any = await meRes.json().catch(() => null);
+            const meInfo = extractMeUser(meJson);
+            if (!meInfo) {
+                // Not logged in (often `{ user: null }`) or unexpected shape.
+                setMe(null);
+                setMessages([]);
+                return;
+            }
+            setMe(meInfo);
 
             const params = new URLSearchParams();
             params.set("limit", "200");
@@ -548,6 +577,7 @@ export default function MessagesPage() {
             setSelectedId((prev) => prev ?? (mapped[0]?.id ?? null));
         } catch (e) {
             console.error(e);
+            setMe(null);
             setMessages([]);
         } finally {
             setLoading(false);
