@@ -176,25 +176,6 @@ function MessagePreview({
                     </span>
                 )}
                 {renderPreviewContent()}
-
-                {canActOnKnock && isPendingKnock && (
-                    <div className="flex items-center gap-2 mt-2">
-                        <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void onKnockAction(msg.knockId!, "approve"); }}
-                            data-testid="knock-approve"
-                            className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 cursor-pointer"
-                        >
-                            Approve
-                        </button>
-                        <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void onKnockAction(msg.knockId!, "reject"); }}
-                            data-testid="knock-reject"
-                            className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-red-600/15 text-red-300 border border-red-500/30 hover:bg-red-600/25 cursor-pointer"
-                        >
-                            Disapprove
-                        </button>
-                    </div>
-                )}
             </div>
             {!msg.read && (
                 <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-2 shadow-[0_0_6px_rgba(59,130,246,0.5)]" />
@@ -607,6 +588,9 @@ export default function MessagesPage() {
             method: "POST",
             credentials: "include",
         });
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("cc:knock-action", { detail: { knockId, action } }));
+        }
         await refresh();
     }, [refresh]);
 

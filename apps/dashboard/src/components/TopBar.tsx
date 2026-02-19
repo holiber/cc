@@ -103,19 +103,6 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
-    const actOnKnock = useCallback(async (knockId: string, action: "approve" | "reject") => {
-        try {
-            await fetch(`/api/knocks/${encodeURIComponent(knockId)}/${action}`, {
-                method: "POST",
-                credentials: "include",
-            });
-        } finally {
-            // In E2E, polling is disabled; keep badge/toasts in sync optimistically.
-            setPendingNotifications((prev) => prev.filter((p) => p.knockId !== knockId));
-            dismissToast(knockId);
-        }
-    }, [dismissToast]);
-
     useEffect(() => {
         let cancelled = false;
         let inflight = false;
@@ -200,6 +187,20 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
             for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
             toastTimersRef.current.clear();
         };
+    }, [dismissToast]);
+
+    // If another part of the app approves/rejects a knock, update badge/toasts immediately
+    // without relying on polling (useful in E2E where polling is disabled).
+    useEffect(() => {
+        function onKnockAction(e: Event) {
+            const detail = (e as CustomEvent<any>)?.detail;
+            const knockId = typeof detail?.knockId === "string" ? detail.knockId : "";
+            if (!knockId) return;
+            setPendingNotifications((prev) => prev.filter((p) => p.knockId !== knockId));
+            dismissToast(knockId);
+        }
+        window.addEventListener("cc:knock-action", onKnockAction as any);
+        return () => window.removeEventListener("cc:knock-action", onKnockAction as any);
     }, [dismissToast]);
 
     // — OpenCode resize —
@@ -408,33 +409,22 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                                 className="rounded-xl border border-white/10 bg-gray-900/95 backdrop-blur-md shadow-xl shadow-black/40 p-3"
                             >
                                 <div className="flex items-start gap-2">
-                                    <div className="flex-1 min-w-0">
+                                    <Link
+                                        href="/messages"
+                                        onClick={() => dismissToast(t.knockId)}
+                                        className="flex-1 min-w-0 cursor-pointer"
+                                        title="Open messages"
+                                    >
                                         <div className="text-[11px] font-bold text-white truncate">{t.subject}</div>
                                         <div className="text-[10px] text-gray-400 truncate">from {t.fromName}</div>
-                                    </div>
+                                        <div className="text-[10px] text-gray-500 mt-1">Open to view details</div>
+                                    </Link>
                                     <button
                                         onClick={() => dismissToast(t.knockId)}
                                         className="text-gray-500 hover:text-white p-1 rounded hover:bg-white/10 cursor-pointer"
                                         aria-label="Dismiss notification"
                                     >
                                         <FiX className="w-3 h-3" />
-                                    </button>
-                                </div>
-
-                                <div className="flex items-center gap-2 mt-2">
-                                    <button
-                                        onClick={() => actOnKnock(t.knockId, "approve")}
-                                        data-testid="knock-toast-approve"
-                                        className="flex-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 cursor-pointer"
-                                    >
-                                        Approve
-                                    </button>
-                                    <button
-                                        onClick={() => actOnKnock(t.knockId, "reject")}
-                                        data-testid="knock-toast-reject"
-                                        className="flex-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-red-600/15 text-red-300 border border-red-500/30 hover:bg-red-600/25 cursor-pointer"
-                                    >
-                                        Disapprove
                                     </button>
                                 </div>
                             </motion.div>

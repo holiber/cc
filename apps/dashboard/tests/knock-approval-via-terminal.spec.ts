@@ -86,20 +86,27 @@ test('demo-admin creates knocks via terminal; sees toast+badge; approves and dis
     const toast2 = page.getByTestId('knock-toast').filter({ hasText: subj2 });
     await expect(toast1.first()).toBeVisible({ timeout: 120_000 });
     await expect(toast2.first()).toBeVisible({ timeout: 120_000 });
-    await expect(toast1.getByTestId('knock-toast-approve')).toBeVisible();
-    await expect(toast1.getByTestId('knock-toast-reject')).toBeVisible();
+    await expect(toast1.getByTestId('knock-toast-approve')).toHaveCount(0);
+    await expect(toast1.getByTestId('knock-toast-reject')).toHaveCount(0);
 
-    // Messages page should list both knocks, with action buttons in the list items.
+    // Messages page should list both knocks (actions are only available in the detail pane).
     const item1 = page.locator('button', { hasText: subj1 }).first();
     const item2 = page.locator('button', { hasText: subj2 }).first();
     await expect(item1).toBeVisible({ timeout: 30_000 });
     await expect(item2).toBeVisible({ timeout: 30_000 });
-    await expect(item1.getByTestId('knock-approve')).toBeVisible();
-    await expect(item1.getByTestId('knock-reject')).toBeVisible();
+    await expect(item1.getByTestId('knock-approve')).toHaveCount(0);
+    await expect(item1.getByTestId('knock-reject')).toHaveCount(0);
 
-    // Approve first knock via the toast, disapprove second.
-    await toast1.getByTestId('knock-toast-approve').click();
-    await toast2.getByTestId('knock-toast-reject').click();
+    // Approve/disapprove only after opening the exact message (detail pane).
+    await item1.click();
+    await expect(page.getByRole('heading', { name: subj1 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('knock-approve')).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('knock-approve').click();
+
+    await item2.click();
+    await expect(page.getByRole('heading', { name: subj2 })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('knock-reject')).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('knock-reject').click();
 
     // Force refresh after actions to avoid waiting on background polling.
     await page.reload({ waitUntil: 'domcontentloaded' });
