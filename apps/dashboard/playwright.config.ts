@@ -7,6 +7,7 @@ const PW_CACHE = path.join(CACHE_ROOT, 'playwright');
 
 const AUTH_FILE = path.join(PW_CACHE, 'auth', 'user.json');
 const baseURL = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || '3222'}`;
+const isCI = !!process.env.CI;
 const isLocal = (() => {
     try {
         const host = new URL(baseURL).hostname;
@@ -22,10 +23,11 @@ const reuseExistingServer = process.env.CC_REUSE_SERVERS === '1' && !process.env
 export default defineConfig({
     testDir: './tests',
     outputDir: path.join(PW_CACHE, 'test-results'),
-    fullyParallel: true,
-    forbidOnly: !!process.env.CI,
-    retries: process.env.CI ? 2 : 0,
-    workers: isLocal ? undefined : 1,
+    fullyParallel: isCI ? false : true,
+    forbidOnly: isCI,
+    retries: isCI ? 2 : 0,
+    // In CI, avoid parallel workers to reduce flakiness and any chance of port/process conflicts.
+    workers: isCI ? 1 : (isLocal ? undefined : 1),
     reporter: [['html', { outputFolder: path.join(PW_CACHE, 'report'), open: 'never' }]],
 
     /**
