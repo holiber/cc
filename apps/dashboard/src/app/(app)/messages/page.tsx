@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     FiMail, FiFile, FiImage, FiVideo, FiCode, FiFileText,
@@ -11,8 +11,7 @@ import {
 } from "react-icons/fi";
 import type { IconType } from "react-icons";
 import {
-    mockMessages, getUnreadCount,
-    type Message, type MessageType, type ArtifactKind, type EventStatus, type SenderRole, type MessageSource,
+    type MessageType, type ArtifactKind, type EventStatus, type SenderRole, type MessageSource,
 } from "@/data/mockMessages";
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -36,12 +35,14 @@ const roleColors: Record<SenderRole, string> = {
     user: "from-blue-500 to-cyan-500",
     agent: "from-purple-500 to-pink-500",
     system: "from-gray-500 to-gray-600",
+    stranger: "from-orange-500 to-amber-500",
 };
 
 const roleBadgeColors: Record<SenderRole, string> = {
     user: "bg-blue-500/20 text-blue-400 border-blue-500/30",
     agent: "bg-purple-500/20 text-purple-400 border-purple-500/30",
     system: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+    stranger: "bg-orange-500/15 text-orange-300 border-orange-500/30",
 };
 
 const eventStatusConfig: Record<EventStatus, { icon: IconType; color: string; bg: string; label: string }> = {
@@ -89,9 +90,20 @@ function Avatar({ name, role, size = "md" }: { name: string; role: SenderRole; s
 
 // ─── Message Preview (list item) ────────────────────────────
 
-function MessagePreview({ msg, mounted }: { msg: Message; mounted: boolean }) {
+function MessagePreview({
+    msg,
+    mounted,
+    canActOnKnock,
+    onKnockAction,
+}: {
+    msg: UiMessage;
+    mounted: boolean;
+    canActOnKnock: boolean;
+    onKnockAction: (knockId: string, action: "approve" | "reject") => void | Promise<void>;
+}) {
     const TypeIcon = typeIcons[msg.type].icon;
     const typeColor = typeIcons[msg.type].color;
+    const isPendingKnock = !!msg.knockId && msg.event?.status === "submitted";
 
     function renderPreviewContent() {
         switch (msg.type) {
@@ -164,6 +176,25 @@ function MessagePreview({ msg, mounted }: { msg: Message; mounted: boolean }) {
                     </span>
                 )}
                 {renderPreviewContent()}
+
+                {canActOnKnock && isPendingKnock && (
+                    <div className="flex items-center gap-2 mt-2">
+                        <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void onKnockAction(msg.knockId!, "approve"); }}
+                            data-testid="knock-approve"
+                            className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 cursor-pointer"
+                        >
+                            Approve
+                        </button>
+                        <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void onKnockAction(msg.knockId!, "reject"); }}
+                            data-testid="knock-reject"
+                            className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-red-600/15 text-red-300 border border-red-500/30 hover:bg-red-600/25 cursor-pointer"
+                        >
+                            Disapprove
+                        </button>
+                    </div>
+                )}
             </div>
             {!msg.read && (
                 <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-2 shadow-[0_0_6px_rgba(59,130,246,0.5)]" />
@@ -174,7 +205,16 @@ function MessagePreview({ msg, mounted }: { msg: Message; mounted: boolean }) {
 
 // ─── Message Detail (right pane) ────────────────────────────
 
-function MessageDetail({ msg }: { msg: Message }) {
+function MessageDetail({
+    msg,
+    canActOnKnock,
+    onKnockAction,
+}: {
+    msg: UiMessage;
+    canActOnKnock: boolean;
+    onKnockAction: (knockId: string, action: "approve" | "reject") => void | Promise<void>;
+}) {
+    const isPendingKnock = !!msg.knockId && msg.event?.status === "submitted";
     return (
         <motion.div
             key={msg.id}
@@ -219,6 +259,25 @@ function MessageDetail({ msg }: { msg: Message }) {
                         )}
                     </div>
                 )}
+
+                {canActOnKnock && isPendingKnock && (
+                    <div className="flex items-center gap-2 mt-3">
+                        <button
+                            onClick={() => void onKnockAction(msg.knockId!, "approve")}
+                            data-testid="knock-approve"
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 cursor-pointer"
+                        >
+                            Approve
+                        </button>
+                        <button
+                            onClick={() => void onKnockAction(msg.knockId!, "reject")}
+                            data-testid="knock-reject"
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-red-600/15 text-red-300 border border-red-500/30 hover:bg-red-600/25 cursor-pointer"
+                        >
+                            Disapprove
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Content */}
@@ -261,7 +320,7 @@ function MessageDetail({ msg }: { msg: Message }) {
 
 // ─── Sub-components ─────────────────────────────────────────
 
-function EventCard({ event }: { event: Message["event"] }) {
+function EventCard({ event }: { event: UiMessage["event"] }) {
     if (!event) return null;
     const cfg = eventStatusConfig[event.status];
     const StatusIcon = cfg.icon;
@@ -319,7 +378,7 @@ function EventCard({ event }: { event: Message["event"] }) {
     );
 }
 
-function ProgressCard({ progress }: { progress: Message["progress"] }) {
+function ProgressCard({ progress }: { progress: UiMessage["progress"] }) {
     if (!progress) return null;
     const pct = Math.round((progress.current / progress.total) * 100);
     const isComplete = progress.current >= progress.total;
@@ -350,7 +409,7 @@ function ProgressCard({ progress }: { progress: Message["progress"] }) {
     );
 }
 
-function ArtifactCard({ artifact }: { artifact: NonNullable<Message["artifacts"]>[number] }) {
+function ArtifactCard({ artifact }: { artifact: NonNullable<UiMessage["artifacts"]>[number] }) {
     const { icon: AIcon, color } = artifactIcons[artifact.kind];
 
     return (
@@ -403,23 +462,155 @@ const filterTabs: { key: FilterTab; label: string }[] = [
 
 // ─── Main Page ──────────────────────────────────────────────
 
+type UiMessage = {
+    id: string;
+    type: MessageType;
+    from: { name: string; role: SenderRole };
+    timestamp: Date;
+    read: boolean;
+    subject?: string;
+    text?: string;
+    externalRef?: string;
+    knockId?: string;
+    event?: {
+        status: EventStatus;
+        taskId: string;
+        taskName: string;
+        detail?: string;
+    };
+    progress?: { current: number; total: number; label: string };
+    artifacts?: Array<{
+        kind: ArtifactKind;
+        name: string;
+        url: string;
+        preview?: string;
+        size?: string;
+        language?: string;
+    }>;
+    source?: MessageSource;
+    project?: string;
+};
+
+function asDate(value: unknown): Date {
+    if (value instanceof Date) return value;
+    if (typeof value === "string") {
+        const d = new Date(value);
+        if (!Number.isNaN(d.getTime())) return d;
+    }
+    return new Date(0);
+}
+
+function mapPayloadMessage(doc: any): UiMessage | null {
+    if (!doc?.id || !doc?.type) return null;
+    const fromRole = (doc.fromRole ?? "system") as SenderRole;
+    const externalRef = typeof doc.externalRef === "string" ? doc.externalRef : undefined;
+    const knockId = externalRef?.startsWith("knock:") ? externalRef.slice("knock:".length) : undefined;
+    const projectName =
+        typeof doc.project === "object" && doc.project
+            ? (doc.project.name as string | undefined)
+            : undefined;
+
+    return {
+        id: String(doc.id),
+        type: doc.type as MessageType,
+        from: { name: String(doc.fromName ?? "Unknown"), role: fromRole },
+        timestamp: asDate(doc.createdAt ?? doc.timestamp),
+        read: false,
+        subject: doc.subject ?? undefined,
+        text: doc.text ?? undefined,
+        externalRef,
+        knockId,
+        source: doc.source ?? undefined,
+        project: projectName,
+        event: doc.event?.status ? doc.event : undefined,
+        progress: typeof doc.progress?.total === "number" ? doc.progress : undefined,
+        artifacts: Array.isArray(doc.artifacts) ? doc.artifacts : undefined,
+    };
+}
+
 export default function MessagesPage() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterTab>("all");
     const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
     const mounted = useIsMounted();
+    const [messages, setMessages] = useState<UiMessage[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [me, setMe] = useState<{ id: string; role: string } | null>(null);
 
-    const unreadCount = useMemo(() => getUnreadCount(), []);
+    const unreadCount = useMemo(() => messages.filter(m => !m.read).length, [messages]);
+
+    const refresh = useCallback(async () => {
+        setLoading(true);
+        try {
+            const meRes = await fetch("/api/users/me", { credentials: "include" });
+            if (!meRes.ok) throw new Error(`Failed to load /api/users/me: ${meRes.status}`);
+            const meJson: any = await meRes.json();
+            const meUser = meJson?.user ?? meJson;
+            const userId = meUser?.id;
+            const role = meUser?.role;
+            if (!userId) throw new Error("No user id in /api/users/me response");
+            setMe({ id: String(userId), role: String(role ?? "") });
+
+            const params = new URLSearchParams();
+            params.set("limit", "200");
+            params.set("sort", "-createdAt");
+            params.set("depth", "1");
+            // Let Payload access control decide which docs are visible to this user.
+            // Avoid client-side role-based where-clauses that can accidentally filter out admin broadcasts.
+
+            const res = await fetch(`/api/messages?${params.toString()}`, { credentials: "include" });
+            if (!res.ok) throw new Error(`Failed to load /api/messages: ${res.status}`);
+            const json: any = await res.json();
+            const docs: any[] = Array.isArray(json?.docs) ? json.docs : [];
+            const mapped = docs.map(mapPayloadMessage).filter(Boolean) as UiMessage[];
+            setMessages(mapped);
+            setSelectedId((prev) => prev ?? (mapped[0]?.id ?? null));
+        } catch (e) {
+            console.error(e);
+            setMessages([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            if (cancelled) return;
+            await refresh();
+        })();
+        return () => { cancelled = true; };
+    }, [refresh]);
+
+    // Lightweight refresh so new events (e.g. knocks) show up without manual reload.
+    useEffect(() => {
+        const isE2E = typeof navigator !== "undefined" && (navigator as any).webdriver === true;
+        if (isE2E) return;
+        const t = window.setInterval(() => {
+            void refresh();
+        }, 4000);
+        return () => window.clearInterval(t);
+    }, [refresh]);
 
     const filteredMessages = useMemo(() =>
-        filter === "all" ? mockMessages : mockMessages.filter(m => m.type === filter)
-        , [filter]);
+        filter === "all" ? messages : messages.filter(m => m.type === filter)
+        , [filter, messages]);
 
     const selectedMessage = useMemo(() =>
-        mockMessages.find(m => m.id === selectedId) ?? null
-        , [selectedId]);
+        messages.find(m => m.id === selectedId) ?? null
+        , [selectedId, messages]);
 
-    const handleSelectMessage = (msg: Message) => {
+    const canActOnKnock = me?.role === "admin";
+
+    const onKnockAction = useCallback(async (knockId: string, action: "approve" | "reject") => {
+        await fetch(`/api/knocks/${encodeURIComponent(knockId)}/${action}`, {
+            method: "POST",
+            credentials: "include",
+        });
+        await refresh();
+    }, [refresh]);
+
+    const handleSelectMessage = (msg: UiMessage) => {
         setSelectedId(msg.id);
         setMobileDetailOpen(true);
     };
@@ -461,6 +652,9 @@ export default function MessagesPage() {
                                 exit={{ opacity: 0 }}
                                 transition={{ duration: 0.15 }}
                             >
+                            {loading && (
+                                <div className="px-4 py-6 text-xs text-gray-500">Loading…</div>
+                            )}
                                 {filteredMessages.map((msg, i) => (
                                     <motion.button
                                         key={msg.id}
@@ -475,13 +669,18 @@ export default function MessagesPage() {
                                             }
                                             ${!msg.read ? "bg-gray-800/30" : ""}`}
                                     >
-                                        <MessagePreview msg={msg} mounted={mounted} />
+                                        <MessagePreview
+                                            msg={msg}
+                                            mounted={mounted}
+                                            canActOnKnock={!!canActOnKnock}
+                                            onKnockAction={onKnockAction}
+                                        />
                                     </motion.button>
                                 ))}
                             </motion.div>
                         </AnimatePresence>
 
-                        {filteredMessages.length === 0 && (
+                    {!loading && filteredMessages.length === 0 && (
                             <div className="flex flex-col items-center justify-center py-16 text-center">
                                 <FiMail className="w-8 h-8 text-gray-700 mb-3" />
                                 <p className="text-xs text-gray-500">No messages of this type</p>
@@ -507,7 +706,11 @@ export default function MessagesPage() {
 
                     <AnimatePresence mode="wait">
                         {selectedMessage ? (
-                            <MessageDetail msg={selectedMessage} />
+                            <MessageDetail
+                                msg={selectedMessage}
+                                canActOnKnock={!!canActOnKnock}
+                                onKnockAction={onKnockAction}
+                            />
                         ) : (
                             <EmptyDetail />
                         )}

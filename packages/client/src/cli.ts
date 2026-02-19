@@ -118,7 +118,13 @@ yargs(hideBin(process.argv))
     .command(
         'knock',
         apiMeta.knock.summary,
-        (y) => y.options(knockOpts).epilog(apiMeta.knock.description),
+        (y) => y
+            .options(knockOpts)
+            .option('ip', {
+                type: 'string',
+                description: 'Set x-forwarded-for (helps avoid rate-limit collisions in tests)',
+            })
+            .epilog(apiMeta.knock.description),
         (argv) => {
             const r = createReporter(argv.url as string);
             run(async () => {
@@ -128,7 +134,7 @@ yargs(hideBin(process.argv))
                     intent: argv.intent as string,
                     secret: argv.secret as string,
                     descriptor: autoDescriptor(),
-                });
+                }, argv.ip ? { headers: { 'x-forwarded-for': String(argv.ip) } } : undefined);
                 if (error) throw new Error((error as any)?.value?.error ?? `Knock failed: ${status}`);
                 return data;
             });
@@ -166,7 +172,7 @@ yargs(hideBin(process.argv))
                 (yy) =>
                     yy
                         .option('token', { type: 'string', demandOption: true, description: 'Admin Bearer token' })
-                        .option('status', { type: 'string', description: 'Filter by status (pending|approved|claimed|expired)' })
+                        .option('status', { type: 'string', description: 'Filter by status (pending|approved|claimed|expired|rejected)' })
                         .epilog(apiMeta['admin.knocks'].description),
                 (argv) => {
                     const r = createReporter(argv.url as string);
@@ -202,6 +208,27 @@ yargs(hideBin(process.argv))
                 },
             )
 
+            // admin reject
+            .command(
+                'reject',
+                apiMeta['admin.reject'].summary,
+                (yy) =>
+                    yy
+                        .option('token', { type: 'string', demandOption: true, description: 'Admin Bearer token' })
+                        .option('id', { type: 'string', demandOption: true, description: 'Knock request ID to reject' })
+                        .epilog(apiMeta['admin.reject'].description),
+                (argv) => {
+                    const r = createReporter(argv.url as string);
+                    run(async () => {
+                        const { data, error, status } = await (r.admin.knocks as any)(
+                            { id: argv.id as string },
+                        ).reject.post({}, { headers: { Authorization: `Bearer ${argv.token}` } });
+                        if (error) throw new Error((error as any)?.value?.error ?? `Reject failed: ${status}`);
+                        return data;
+                    });
+                },
+            )
+
             .demandCommand(1)
             .strict(),
     )
@@ -215,6 +242,7 @@ yargs(hideBin(process.argv))
      *   health
      *   knock --name alex --role agent --intent "review code" --secret s3cr3t
      *   admin.approve --token tok_xxx --id knock_yyy
+     *   admin.reject --token tok_xxx --id knock_yyy
      *
      * Ctrl+C to disconnect.
      */

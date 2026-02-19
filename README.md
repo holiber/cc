@@ -10,6 +10,14 @@ pnpm dev
 
 By default the dashboard runs on `http://localhost:3222`.
 
+The dev-mode database (Payload SQLite) is stored in `.cache/data/dashboard/cc.db` by default.
+
+To wipe dev data and start fresh:
+
+```bash
+pnpm dev:reset-db
+```
+
 ### Tests
 
 Runs vitest + Playwright E2E:

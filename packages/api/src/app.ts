@@ -2,12 +2,12 @@ import { Elysia } from 'elysia';
 import {
     KnockRequestSchema, KnockResponseSchema,
     ClaimRequestSchema, TokenResponseSchema,
-    KnockListSchema, ApproveResponseSchema,
+    KnockListSchema, ApproveResponseSchema, RejectResponseSchema,
     HealthSchema, ErrorSchema,
 } from './schemas';
 import {
     checkRateLimit, createKnock, claimKnock,
-    listKnocks, approveKnock, validateAdminToken,
+    listKnocks, approveKnock, rejectKnock, validateAdminToken,
 } from './store';
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -115,6 +115,7 @@ const app = new Elysia()
             message: 'Knock approved.',
         };
     }, {
+        response: ApproveResponseSchema,
         detail: {
             summary: 'Approve a knock request',
             description: 'Approve a pending knock request so the agent can claim a token.',
@@ -123,86 +124,31 @@ const app = new Elysia()
         },
     })
 
-    // ── WebSocket — persistent session ──────────────────────
-    /**
-     * Connect opens a persistent WebSocket session.
-     *
-     * Inbound messages: JSON lines  { method: string, args?: unknown }
-     * Outbound messages: JSON lines { id?, ok: boolean, data?, error? }
-     *
-     * Supported methods: health, knock, claim, admin.knocks, admin.approve
-     */
-    .ws('/connect', {
-        async message(ws, raw) {
-            let parsed: { method: string; args?: Record<string, unknown> };
+    .post('/admin/knocks/:id/reject', ({ request, params, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token || !validateAdminToken(token)) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
 
-            try {
-                parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as any);
-            } catch {
-                ws.send(JSON.stringify({ ok: false, error: 'Invalid JSON' }));
-                return;
-            }
+        const knock = rejectKnock(params.id);
+        if (!knock) {
+            set.status = 404;
+            return { error: 'Knock not found or not pending.', code: 'NOT_FOUND' };
+        }
 
-            const { method, args = {} } = parsed;
-
-            try {
-                let result: unknown;
-
-                switch (method) {
-                    case 'health':
-                        result = {
-                            status: 'ok',
-                            version: '0.1.0',
-                            uptime: Math.floor((Date.now() - startTime) / 1000),
-                        };
-                        break;
-
-                    case 'knock': {
-                        const knock = createKnock(args as any);
-                        result = {
-                            requestId: knock.id,
-                            expiresAt: knock.expiresAt,
-                            message: 'Knock received. Awaiting admin approval.',
-                        };
-                        break;
-                    }
-
-                    case 'claim': {
-                        const { requestId, secret } = args as { requestId: string; secret: string };
-                        const token = claimKnock(requestId, secret);
-                        if (!token) throw new Error('Knock not found, not approved, or invalid secret.');
-                        result = token;
-                        break;
-                    }
-
-                    case 'admin.knocks': {
-                        const { token: adminToken, status: statusFilter } = args as { token: string; status?: string };
-                        if (!validateAdminToken(adminToken)) throw new Error('Unauthorized');
-                        result = { knocks: listKnocks(statusFilter) };
-                        break;
-                    }
-
-                    case 'admin.approve': {
-                        const { token: adminToken, id } = args as { token: string; id: string };
-                        if (!validateAdminToken(adminToken)) throw new Error('Unauthorized');
-                        const knock = approveKnock(id);
-                        if (!knock) throw new Error('Knock not found or not pending.');
-                        result = { id: knock.id, status: 'approved', message: 'Knock approved.' };
-                        break;
-                    }
-
-                    default:
-                        throw new Error(`Unknown method: ${method}`);
-                }
-
-                ws.send(JSON.stringify({ ok: true, data: result }));
-            } catch (err: any) {
-                ws.send(JSON.stringify({ ok: false, error: err.message ?? String(err) }));
-            }
-        },
-
-        open(ws) {
-            ws.send(JSON.stringify({ ok: true, event: 'connected', data: { hint: 'Send {method, args} JSON lines.' } }));
+        return {
+            id: knock.id,
+            status: 'rejected' as const,
+            message: 'Knock rejected.',
+        };
+    }, {
+        response: RejectResponseSchema,
+        detail: {
+            summary: 'Reject a knock request',
+            description: 'Reject a pending knock request so it cannot be claimed.',
+            tags: ['Admin'],
+            security: [{ Bearer: [] }],
         },
     });
 

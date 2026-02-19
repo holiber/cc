@@ -14,19 +14,20 @@ export {
     KnockRequestSchema, KnockResponseSchema,
     ClaimRequestSchema, TokenResponseSchema,
     KnockEntrySchema, KnockListSchema,
-    ApproveResponseSchema, HealthSchema,
+    ApproveResponseSchema, RejectResponseSchema, HealthSchema,
     ErrorSchema, DescriptorSchema,
 } from './schemas';
 export type {
     KnockRequest, KnockResponse,
     ClaimRequest, TokenResponse,
     KnockEntry, KnockList,
-    ApproveResponse, Health,
+    ApproveResponse, RejectResponse, Health,
     Descriptor,
 } from './schemas';
 
 // Store (for testing / direct usage)
-export { resetStores } from './store';
+export { resetStores, setKnockHooks } from './store';
+export type { KnockHooks } from './store';
 
 /**
  * Human-readable metadata for every API command.
@@ -56,6 +57,10 @@ export const apiMeta = {
     'admin.approve': {
         summary: 'Approve a knock request',
         description: 'Approve a pending knock request so the agent can claim a token.',
+    },
+    'admin.reject': {
+        summary: 'Reject a knock request',
+        description: 'Reject a pending knock request so it cannot be claimed.',
     },
     connect: {
         summary: 'Open a persistent WebSocket session',

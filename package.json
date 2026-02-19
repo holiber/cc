@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm -F @command-center/dashboard dev",
+    "dev:reset-db": "node scripts/reset-dev-db.mjs",
     "build": "pnpm -F @command-center/dashboard build",
     "lint": "pnpm -F @command-center/dashboard lint",
     "storybook": "pnpm -F @command-center/dashboard storybook",
@@ -15,8 +16,11 @@
     "pw:trace": "node scripts/show-trace.mjs"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.0",
     "@types/ws": "^8.18.1",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "next": "16.1.6",
+    "tailwindcss": "^4.2.0"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,7 +11,6 @@ import type { IconType } from "react-icons";
 import BurgerMenu from "@/components/BurgerMenu";
 import Footer from "@/components/Footer";
 import TerminalManager from "@/components/terminal/TerminalManager";
-import { getUnreadCount } from "@/data/mockMessages";
 import { NAV_ITEMS } from "@/components/navConfig";
 
 const SIDEBAR_WIDTH = 224; // w-56 = 14rem = 224px
@@ -39,6 +38,13 @@ function getPageMeta(pathname: string): PageMeta {
     return FALLBACK_META;
 }
 
+type NotificationToast = {
+    knockId: string;
+    subject: string;
+    fromName: string;
+    createdAt: string;
+};
+
 export default function TopBar({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const [menuOpen, setMenuOpen] = useState(false);
@@ -46,11 +52,155 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
     const [isTerminalOpen, setIsTerminalOpen] = useState(() => pathname === '/messages');
     const [opencodeWidth, setOpencodeWidth] = useState(DEFAULT_OPENCODE_WIDTH);
     const [terminalHeight, setTerminalHeight] = useState(DEFAULT_TERMINAL_HEIGHT);
-    const unread = getUnreadCount();
     const pageMeta = getPageMeta(pathname);
     const PageIcon = pageMeta.icon;
 
     const toggleTerminal = useCallback(() => setIsTerminalOpen(v => !v), []);
+
+    const mailRef = useRef<HTMLDivElement | null>(null);
+    const [mailAnchor, setMailAnchor] = useState<{ top: number; right: number } | null>(null);
+
+    const [isAdmin, setIsAdmin] = useState(false);
+    const [pendingNotifications, setPendingNotifications] = useState<NotificationToast[]>([]);
+    const [notificationToasts, setNotificationToasts] = useState<NotificationToast[]>([]);
+    const seenNotificationsRef = useRef<Set<string>>(new Set());
+    const toastTimersRef = useRef<Map<string, number>>(new Map());
+
+    const unread = pendingNotifications.length;
+
+    const toastStyle = useMemo(() => ({
+        position: "fixed" as const,
+        top: mailAnchor?.top ?? 56,
+        right: mailAnchor?.right ?? 12,
+        zIndex: 120,
+    }), [mailAnchor]);
+
+    useEffect(() => {
+        function updateAnchor() {
+            const el = mailRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            setMailAnchor({
+                top: Math.round(rect.bottom + 8),
+                right: Math.round(window.innerWidth - rect.right),
+            });
+        }
+        updateAnchor();
+        window.addEventListener("resize", updateAnchor);
+        window.addEventListener("scroll", updateAnchor, true);
+        return () => {
+            window.removeEventListener("resize", updateAnchor);
+            window.removeEventListener("scroll", updateAnchor, true);
+        };
+    }, []);
+
+    const dismissToast = useCallback((knockId: string) => {
+        setNotificationToasts((prev) => prev.filter((t) => t.knockId !== knockId));
+        const timer = toastTimersRef.current.get(knockId);
+        if (timer) {
+            window.clearTimeout(timer);
+            toastTimersRef.current.delete(knockId);
+        }
+    }, []);
+
+    const actOnKnock = useCallback(async (knockId: string, action: "approve" | "reject") => {
+        try {
+            await fetch(`/api/knocks/${encodeURIComponent(knockId)}/${action}`, {
+                method: "POST",
+                credentials: "include",
+            });
+        } finally {
+            // In E2E, polling is disabled; keep badge/toasts in sync optimistically.
+            setPendingNotifications((prev) => prev.filter((p) => p.knockId !== knockId));
+            dismissToast(knockId);
+        }
+    }, [dismissToast]);
+
+    useEffect(() => {
+        let cancelled = false;
+        let inflight = false;
+        const isE2E = typeof navigator !== "undefined" && (navigator as any).webdriver === true;
+
+        async function tick() {
+            if (cancelled || inflight) return;
+            inflight = true;
+            try {
+                const meRes = await fetch("/api/users/me", { credentials: "include" });
+                if (!meRes.ok) return;
+                const meJson: any = await meRes.json();
+                const meUser = meJson?.user ?? meJson;
+                const role = meUser?.role;
+                const admin = role === "admin";
+                if (!cancelled) setIsAdmin(admin);
+                if (!admin) {
+                    if (!cancelled) {
+                        setPendingNotifications([]);
+                        setNotificationToasts([]);
+                    }
+                    return;
+                }
+
+                const params = new URLSearchParams();
+                params.set("limit", "25");
+                params.set("sort", "-createdAt");
+                params.set("depth", "0");
+                params.set("where[broadcastToAdmins][equals]", "true");
+                params.set("where[event.status][equals]", "submitted");
+                params.set("where[event.taskName][equals]", "Knock request");
+
+                const res = await fetch(`/api/messages?${params.toString()}`, { credentials: "include" });
+                if (!res.ok) return;
+                const json: any = await res.json();
+                const docs: any[] = Array.isArray(json?.docs) ? json.docs : [];
+
+                const nextPending: NotificationToast[] = docs
+                    .map((d) => {
+                        const externalRef = typeof d?.externalRef === "string" ? d.externalRef : "";
+                        const knockId = externalRef.startsWith("knock:") ? externalRef.slice("knock:".length) : "";
+                        if (!knockId) return null;
+                        return {
+                            knockId,
+                            subject: String(d?.subject ?? "Knock request"),
+                            fromName: String(d?.fromName ?? "Stranger"),
+                            createdAt: String(d?.createdAt ?? ""),
+                        } satisfies NotificationToast;
+                    })
+                    .filter(Boolean) as NotificationToast[];
+
+                if (!cancelled) setPendingNotifications(nextPending);
+
+                for (const k of nextPending) {
+                    if (seenNotificationsRef.current.has(k.knockId)) continue;
+                    seenNotificationsRef.current.add(k.knockId);
+                    if (cancelled) break;
+
+                    setNotificationToasts((prev) => [k, ...prev].slice(0, 3));
+                    const t = window.setTimeout(() => dismissToast(k.knockId), 20_000);
+                    toastTimersRef.current.set(k.knockId, t);
+                }
+            } finally {
+                inflight = false;
+            }
+        }
+
+        tick();
+        if (isE2E) {
+            // Avoid background polling in Playwright; tests should explicitly reload/refresh.
+            return () => {
+                cancelled = true;
+                for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
+                toastTimersRef.current.clear();
+            };
+        }
+
+        const timer = window.setInterval(tick, 3000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
+            toastTimersRef.current.clear();
+        };
+    }, [dismissToast]);
 
     // — OpenCode resize —
     const startOpencodeResize = useCallback((e: React.MouseEvent) => {
@@ -123,22 +273,27 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                         </div>
 
                         <div className="flex items-center gap-2">
-                            <Link
-                                href="/messages"
-                                className={`relative w-8 h-8 rounded-lg border flex items-center justify-center transition-colors backdrop-blur-sm
-                                    ${pathname === "/messages"
-                                        ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
-                                        : "bg-gray-800/80 border-white/10 text-gray-400 hover:text-white hover:bg-gray-700/80"
-                                    }`}
-                                aria-label="Messages"
-                            >
-                                <FiMail className="w-4 h-4" />
-                                {unread > 0 && (
-                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-red-500/40 animate-pulse">
-                                        {unread > 9 ? "9+" : unread}
-                                    </span>
-                                )}
-                            </Link>
+                            <div ref={mailRef}>
+                                <Link
+                                    href="/messages"
+                                    className={`relative w-8 h-8 rounded-lg border flex items-center justify-center transition-colors backdrop-blur-sm
+                                        ${pathname === "/messages"
+                                            ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
+                                            : "bg-gray-800/80 border-white/10 text-gray-400 hover:text-white hover:bg-gray-700/80"
+                                        }`}
+                                    aria-label="Messages"
+                                >
+                                    <FiMail className="w-4 h-4" />
+                                    {unread > 0 && (
+                                        <span
+                                            data-testid="messages-badge"
+                                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-red-500/40 animate-pulse"
+                                        >
+                                            {unread > 9 ? "9+" : unread}
+                                        </span>
+                                    )}
+                                </Link>
+                            </div>
 
                             <button
                                 onClick={() => setOpencodeOpen(v => !v)}
@@ -230,6 +385,63 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                     )}
                 </AnimatePresence>
             </motion.div>
+
+            {/* Toast notifications (admin only) */}
+            <AnimatePresence>
+                {isAdmin && notificationToasts.length > 0 && (
+                    <motion.div
+                        data-testid="knock-toast-container"
+                        style={toastStyle as any}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        className="w-[340px] max-w-[90vw] space-y-2"
+                    >
+                        {notificationToasts.map((t) => (
+                            <motion.div
+                                key={t.knockId}
+                                data-testid="knock-toast"
+                                data-knock-id={t.knockId}
+                                initial={{ opacity: 0, y: -6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -6 }}
+                                className="rounded-xl border border-white/10 bg-gray-900/95 backdrop-blur-md shadow-xl shadow-black/40 p-3"
+                            >
+                                <div className="flex items-start gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-[11px] font-bold text-white truncate">{t.subject}</div>
+                                        <div className="text-[10px] text-gray-400 truncate">from {t.fromName}</div>
+                                    </div>
+                                    <button
+                                        onClick={() => dismissToast(t.knockId)}
+                                        className="text-gray-500 hover:text-white p-1 rounded hover:bg-white/10 cursor-pointer"
+                                        aria-label="Dismiss notification"
+                                    >
+                                        <FiX className="w-3 h-3" />
+                                    </button>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-2">
+                                    <button
+                                        onClick={() => actOnKnock(t.knockId, "approve")}
+                                        data-testid="knock-toast-approve"
+                                        className="flex-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30 cursor-pointer"
+                                    >
+                                        Approve
+                                    </button>
+                                    <button
+                                        onClick={() => actOnKnock(t.knockId, "reject")}
+                                        data-testid="knock-toast-reject"
+                                        className="flex-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-red-600/15 text-red-300 border border-red-500/30 hover:bg-red-600/25 cursor-pointer"
+                                    >
+                                        Disapprove
+                                    </button>
+                                </div>
+                            </motion.div>
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

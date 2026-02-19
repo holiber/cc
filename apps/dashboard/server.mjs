@@ -2,29 +2,448 @@
  * Custom dev server wrapper.
  * Wraps the standard Next.js dev server.
  * Also properly forwards HMR WebSocket upgrades to Next.js.
- * 
+ *
  * Usage: node server.mjs (replaces `next dev`)
  */
 import { createServer } from 'http';
-import { parse } from 'url';
 import next from 'next';
 import { config } from 'dotenv';
+import crypto from 'crypto';
+import net from 'net';
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import apiAppMod from '@command-center/api/app';
+import { WebSocketServer } from 'ws';
+import apiStoreMod from '@command-center/api/store';
 
 config({ path: '.env' });
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = '0.0.0.0';
-const port = parseInt(process.env.PORT || '3222', 10);
+
+function isPortFree(port) {
+    return new Promise((resolve) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.once('error', () => resolve(false));
+        srv.listen(port, hostname, () => srv.close(() => resolve(true)));
+    });
+}
+
+function getEphemeralPort() {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.once('error', reject);
+        srv.listen(0, '127.0.0.1', () => {
+            const addr = srv.address();
+            const picked = typeof addr === 'object' && addr ? addr.port : null;
+            srv.close(() => resolve(picked));
+        });
+    });
+}
+
+const repoRoot = path.resolve(process.cwd(), '../..');
+const pidFilePath = path.join(repoRoot, '.cache', 'cc-dev-server.json');
+
+function safeExec(cmd) {
+    try {
+        return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').trim();
+    } catch {
+        return '';
+    }
+}
+
+function findListeningPid(port) {
+    // macOS/Linux: lsof prints PIDs for listening sockets.
+    const out = safeExec(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`);
+    if (!out) return null;
+    const first = out.split(/\s+/g).find(Boolean);
+    const pid = first ? Number(first) : NaN;
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+}
+
+function findFileHolderPid(filePath) {
+    const out = safeExec(`lsof -nP -t -- "${filePath}"`);
+    if (!out) return null;
+    const first = out.split(/\s+/g).find(Boolean);
+    const pid = first ? Number(first) : NaN;
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+}
+
+function getProcessCommand(pid) {
+    // `ps -o command=` prints full command line.
+    return safeExec(`ps -p ${pid} -o command=`);
+}
+
+function getProcessCwd(pid) {
+    const out = safeExec(`lsof -a -p ${pid} -d cwd`);
+    if (!out) return '';
+    const lines = out.split('\n');
+    for (const line of lines) {
+        if (line.includes(' cwd ') && line.includes(repoRoot)) {
+            const parts = line.trim().split(/\s+/g);
+            return parts[parts.length - 1] || '';
+        }
+    }
+    return '';
+}
+
+function readPidFile() {
+    try {
+        const raw = fs.readFileSync(pidFilePath, 'utf8');
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+function writePidFile(data) {
+    try {
+        fs.mkdirSync(path.dirname(pidFilePath), { recursive: true });
+        fs.writeFileSync(pidFilePath, JSON.stringify(data, null, 2));
+    } catch {
+        // ignore
+    }
+}
+
+function isOurWorkspaceServerProcess(pid) {
+    // Strong check: command line must contain both this repo root and server.mjs.
+    const cmd = getProcessCommand(pid);
+    if (!cmd) return false;
+    const normalized = cmd.replace(/\\/g, '/');
+    const rootNorm = repoRoot.replace(/\\/g, '/');
+    if (!normalized.includes(rootNorm)) return false;
+    if (!normalized.includes('apps/dashboard/server.mjs')) return false;
+
+    // Optional: if pid file matches, that's extra confidence.
+    const meta = readPidFile();
+    if (meta && meta.pid === pid && meta.repoRoot === repoRoot) return true;
+
+    // If pid file is missing/stale but cmdline matches, accept.
+    return true;
+}
+
+function isLikelyOurDashboardDevProcess(pid) {
+    const cmd = getProcessCommand(pid);
+    if (!cmd) return false;
+    if (!cmd.includes('node')) return false;
+    if (!cmd.includes('server.mjs')) return false;
+
+    const cwd = getProcessCwd(pid);
+    return cwd === path.join(repoRoot, 'apps/dashboard');
+}
+
+let port = parseInt(process.env.PORT || '3222', 10);
+if (dev) {
+    if (!Number.isFinite(port) || port <= 0) {
+        const picked = await getEphemeralPort();
+        if (typeof picked === 'number' && picked > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(`[dev] PORT=${process.env.PORT} requested; using ephemeral ${picked}.`);
+            port = picked;
+            process.env.PORT = String(picked);
+        } else {
+            port = 3222;
+        }
+    }
+
+    // If the chosen port is busy, pick a free port and warn.
+    // This keeps `pnpm dev` usable on busy machines without manual port policing.
+    const ok = await isPortFree(port);
+    if (!ok) {
+        const pid = findListeningPid(port);
+        if (pid && (isOurWorkspaceServerProcess(pid) || isLikelyOurDashboardDevProcess(pid))) {
+            // eslint-disable-next-line no-console
+            console.warn(`[dev] PORT ${port} is busy, but it looks like our previous server (pid ${pid}). Stopping it...`);
+            try {
+                process.kill(pid, 'SIGTERM');
+            } catch {
+                // ignore
+            }
+
+            // Give the OS a moment to release the socket.
+            await new Promise((r) => setTimeout(r, 250));
+            const freed = await isPortFree(port);
+            if (freed) {
+                // eslint-disable-next-line no-console
+                console.warn(`[dev] Reusing PORT ${port}.`);
+            } else {
+                const picked = await getEphemeralPort();
+                if (typeof picked === 'number' && picked > 0) {
+                    // eslint-disable-next-line no-console
+                    console.warn(`[dev] PORT ${port} is still busy. Using ${picked} instead.`);
+                    port = picked;
+                    process.env.PORT = String(picked);
+                }
+            }
+        } else {
+            const picked = await getEphemeralPort();
+            if (typeof picked === 'number' && picked > 0) {
+                // eslint-disable-next-line no-console
+                console.warn(`[dev] PORT ${port} is busy (EADDRINUSE). Using ${picked} instead.`);
+                port = picked;
+                process.env.PORT = String(picked);
+            }
+        }
+    }
+}
+
+// Default Next.js output into repo `.cache/` to avoid writing into apps/dashboard/.
+// If another dev server is running, avoid lock conflicts by using a per-port distDir.
+// (Tests set NEXT_DIST_DIR explicitly; this only applies when unset.)
+if (!process.env.NEXT_DIST_DIR || process.env.NEXT_DIST_DIR === '') {
+    const baseDistDir = '../../.cache/next-dev';
+    const absBase = path.resolve(process.cwd(), baseDistDir);
+    const lockPath = path.join(absBase, 'dev', 'lock');
+    if (dev && fs.existsSync(lockPath)) {
+        const holderPid = findFileHolderPid(lockPath);
+
+        if (!holderPid) {
+            // Stale lock file (no process has it open) — safe to remove.
+            try { fs.rmSync(lockPath, { force: true }); } catch { /* ignore */ }
+        } else if (isOurWorkspaceServerProcess(holderPid) || isLikelyOurDashboardDevProcess(holderPid)) {
+            // eslint-disable-next-line no-console
+            console.warn(`[dev] Next dev lock detected at ${lockPath}. Stopping previous workspace server (pid ${holderPid})...`);
+            try { process.kill(holderPid, 'SIGTERM'); } catch { /* ignore */ }
+            await new Promise((r) => setTimeout(r, 250));
+            try { fs.rmSync(lockPath, { force: true }); } catch { /* ignore */ }
+        }
+
+        if (fs.existsSync(lockPath)) {
+            const perPort = `../../.cache/next-dev-${port}`;
+            // eslint-disable-next-line no-console
+            console.warn(`[dev] Next dev lock still present at ${lockPath}. Using NEXT_DIST_DIR=${perPort}`);
+            process.env.NEXT_DIST_DIR = perPort;
+        } else {
+            process.env.NEXT_DIST_DIR = baseDistDir;
+        }
+    } else {
+        process.env.NEXT_DIST_DIR = baseDistDir;
+    }
+}
+
+// Record our current dev server so future runs can safely stop it if needed.
+if (dev) {
+    writePidFile({
+        pid: process.pid,
+        port,
+        repoRoot,
+        cwd: process.cwd(),
+        nextDistDir: process.env.NEXT_DIST_DIR,
+        startedAt: new Date().toISOString(),
+    });
+}
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+const apiApp = apiAppMod?.default ?? apiAppMod;
+const apiStore = apiStoreMod?.default ?? apiStoreMod;
+
+const startTime = Date.now();
+
+if (!process.env.CC_INTERNAL_TOKEN) {
+    process.env.CC_INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
+}
+
+function readBody(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => resolve(Buffer.concat(chunks)));
+        req.on('error', reject);
+    });
+}
+
+function nodeHeadersToFetchHeaders(nodeHeaders) {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(nodeHeaders)) {
+        if (value == null) continue;
+        if (Array.isArray(value)) headers.set(key, value.join(', '));
+        else headers.set(key, String(value));
+    }
+    return headers;
+}
+
+async function sendFetchResponse(res, fetchRes) {
+    res.statusCode = fetchRes.status;
+    fetchRes.headers.forEach((value, key) => {
+        // Avoid breaking Node by sending hop-by-hop headers
+        if (key.toLowerCase() === 'transfer-encoding') return;
+        res.setHeader(key, value);
+    });
+    const buf = Buffer.from(await fetchRes.arrayBuffer());
+    res.end(buf);
+}
+
+function safeJsonParse(text) {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
+
+async function createAdminBroadcastMessageForKnock({ requestId, knockBody }) {
+    try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/internal/knock-message`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-cc-internal': process.env.CC_INTERNAL_TOKEN,
+            },
+            body: JSON.stringify({ requestId, knockBody }),
+        });
+        // Determinism matters for tests; still don't hard-fail the request if it breaks.
+        if (!res.ok) await res.text().catch(() => null);
+    } catch {
+        // ignore
+    }
+}
+
+async function handleApiRequest(req, res) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host || `${hostname}:${port}`;
+    const originalUrl = `${proto}://${host}${req.url}`;
+
+    const u = new URL(originalUrl);
+    if (u.pathname === '/api/v1') u.pathname = '/';
+    else if (u.pathname.startsWith('/api/v1/')) u.pathname = u.pathname.slice('/api/v1'.length);
+    const url = u.toString();
+
+    const isBodyless = req.method === 'GET' || req.method === 'HEAD';
+    const bodyBuf = isBodyless ? undefined : await readBody(req);
+
+    const bodyText = bodyBuf ? bodyBuf.toString('utf8') : '';
+    const forwarded = new Request(url, {
+        method: req.method,
+        headers: nodeHeadersToFetchHeaders(req.headers),
+        body: isBodyless ? undefined : bodyText,
+    });
+
+    const fetchRes = await apiApp.fetch(forwarded);
+
+    // Deterministic side-effect: when a knock is submitted over HTTP, create the admin-visible message
+    // before the client proceeds, to keep E2E stable.
+    try {
+        const original = new URL(originalUrl);
+        if (req.method === 'POST' && original.pathname === '/api/v1/knock' && fetchRes.ok) {
+            const clone = fetchRes.clone();
+            const knockResponse = safeJsonParse(await clone.text());
+            const requestId = knockResponse?.requestId;
+            if (typeof requestId === 'string' && requestId.length > 0) {
+                const knockBody = safeJsonParse(bodyText) ?? {};
+                await createAdminBroadcastMessageForKnock({ requestId, knockBody });
+            }
+        }
+    } catch {
+        // ignore
+    }
+
+    await sendFetchResponse(res, fetchRes);
+}
 
 app.prepare().then(() => {
     // Must be called after prepare()
     const nextUpgradeHandler = app.getUpgradeHandler();
 
+    const wss = new WebSocketServer({ noServer: true });
+
+    wss.on('connection', (socket) => {
+        socket.send(JSON.stringify({ ok: true, event: 'connected', data: { hint: 'Send {method, args} JSON lines.' } }));
+
+        socket.on('message', async (raw) => {
+            const text = typeof raw === 'string' ? raw : raw?.toString?.('utf8') ?? '';
+            const parsed = safeJsonParse(text);
+            if (!parsed || typeof parsed?.method !== 'string') {
+                socket.send(JSON.stringify({ ok: false, error: 'Invalid JSON' }));
+                return;
+            }
+
+            const method = parsed.method;
+            const args = parsed.args && typeof parsed.args === 'object' ? parsed.args : {};
+
+            try {
+                let result;
+
+                switch (method) {
+                    case 'health':
+                        result = {
+                            status: 'ok',
+                            version: '0.1.0',
+                            uptime: Math.floor((Date.now() - startTime) / 1000),
+                        };
+                        break;
+
+                    case 'knock': {
+                        const knock = apiStore.createKnock(args);
+                        result = {
+                            requestId: knock.id,
+                            expiresAt: knock.expiresAt,
+                            message: 'Knock received. Awaiting admin approval.',
+                        };
+
+                        // Best-effort side-effect, awaited so client sees it quickly.
+                        await createAdminBroadcastMessageForKnock({ requestId: knock.id, knockBody: args });
+                        break;
+                    }
+
+                    case 'claim': {
+                        const requestId = String(args.requestId || '');
+                        const secret = String(args.secret || '');
+                        const token = apiStore.claimKnock(requestId, secret);
+                        if (!token) throw new Error('Knock not found, not approved, or invalid secret.');
+                        result = token;
+                        break;
+                    }
+
+                    case 'admin.knocks': {
+                        const token = String(args.token || '');
+                        const status = args.status != null ? String(args.status) : undefined;
+                        if (!apiStore.validateAdminToken(token)) throw new Error('Unauthorized');
+                        result = { knocks: apiStore.listKnocks(status) };
+                        break;
+                    }
+
+                    case 'admin.approve': {
+                        const token = String(args.token || '');
+                        const id = String(args.id || '');
+                        if (!apiStore.validateAdminToken(token)) throw new Error('Unauthorized');
+                        const knock = apiStore.approveKnock(id);
+                        if (!knock) throw new Error('Knock not found or not pending.');
+                        result = { id: knock.id, status: 'approved', message: 'Knock approved.' };
+                        break;
+                    }
+
+                    case 'admin.reject': {
+                        const token = String(args.token || '');
+                        const id = String(args.id || '');
+                        if (!apiStore.validateAdminToken(token)) throw new Error('Unauthorized');
+                        const knock = apiStore.rejectKnock(id);
+                        if (!knock) throw new Error('Knock not found or not pending.');
+                        result = { id: knock.id, status: 'rejected', message: 'Knock rejected.' };
+                        break;
+                    }
+
+                    default:
+                        throw new Error(`Unknown method: ${method}`);
+                }
+
+                socket.send(JSON.stringify({ ok: true, data: result }));
+            } catch (e) {
+                socket.send(JSON.stringify({ ok: false, error: e?.message ? String(e.message) : String(e) }));
+            }
+        });
+    });
+
     const server = createServer(async (req, res) => {
         try {
+            if (req.url && (req.url === '/api/v1' || req.url.startsWith('/api/v1/'))) {
+                await handleApiRequest(req, res);
+                return;
+            }
+
             await handle(req, res);
         } catch (err) {
             console.error('Error occurred handling', req.url, err);
@@ -35,11 +454,25 @@ app.prepare().then(() => {
 
     // Handle WebSocket upgrade requests
     server.on('upgrade', (req, socket, head) => {
+        try {
+            const url = new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`);
+            if (url.pathname === '/connect' || url.pathname === '/api/v1/connect') {
+                wss.handleUpgrade(req, socket, head, (ws) => {
+                    wss.emit('connection', ws, req);
+                });
+                return;
+            }
+        } catch {
+            // fall through
+        }
+
         // Forward HMR and other Next.js WebSocket upgrades
         nextUpgradeHandler(req, socket, head);
     });
 
     server.listen(port, hostname, () => {
-        console.log(`> Ready on http://${hostname}:${port}`);
+        const addr = server.address();
+        const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+        console.log(`> Ready on http://${hostname}:${actualPort}`);
     });
 });

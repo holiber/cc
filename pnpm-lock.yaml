@@ -21,12 +21,21 @@ importers:
         specifier: ^8.19.0
         version: 8.19.0
     devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4.2.0
+        version: 4.2.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
       concurrently:
         specifier: ^9.2.1
         version: 9.2.1
+      next:
+        specifier: 16.1.6
+        version: 16.1.6(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(sass@1.77.4)
+      tailwindcss:
+        specifier: ^4.2.0
+        version: 4.2.0
 
   apps/dashboard:
     dependencies:
@@ -87,6 +96,9 @@ importers:
       sharp:
         specifier: ^0.33.5
         version: 0.33.5
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
     devDependencies:
       '@playwright/test':
         specifier: ^1.58.1

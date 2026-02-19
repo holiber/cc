@@ -5,6 +5,8 @@ import path from 'path'
 import fs from 'fs'
 import { Users } from './collections/Users'
 import { Media } from './collections/Media'
+import { Projects } from './collections/Projects'
+import { Messages } from './collections/Messages'
 import { seedPlugin } from './plugins/seed'
 
 /**
@@ -33,7 +35,7 @@ export default buildConfig({
             },
         },
     },
-    collections: [Users, Media],
+    collections: [Users, Media, Projects, Messages],
     secret: process.env.PAYLOAD_SECRET || 'command-center-dev-secret-change-me',
     db: sqliteAdapter({
         client: {

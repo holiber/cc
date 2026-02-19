@@ -39,7 +39,8 @@ export default defineConfig({
     use: {
         baseURL,
         trace: 'on-first-retry',
-        video: 'on',
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
     },
     projects: [
         // Auth setup — runs first, stores cookies

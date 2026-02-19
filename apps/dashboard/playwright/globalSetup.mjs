@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // playwright/globalSetup.mjs → apps/dashboard → apps → repo root
-const ROOT = path.resolve(__dirname, '../../../..');
+const ROOT = path.resolve(__dirname, '../../..');
 
 export default async function globalSetup() {
     if (!process.env.CC_DATA_DIR) {

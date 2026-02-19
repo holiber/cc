@@ -143,6 +143,14 @@ export default function XtermView({ wsUrl, onTitleChange, active }: XtermViewPro
     }, [active]);
 
     return (
-        <div ref={terminalRef} className="w-full h-full overflow-hidden bg-[#1e1e1e]" />
+        <div
+            ref={terminalRef}
+            data-testid="xterm-container"
+            className="w-full h-full overflow-hidden bg-[#1e1e1e]"
+            // Ensure clicks focus the hidden textarea so keyboard input works reliably (including in E2E).
+            onMouseDown={() => {
+                try { xtermRef.current?.focus(); } catch { /* ignore */ }
+            }}
+        />
     );
 }

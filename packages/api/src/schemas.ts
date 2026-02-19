@@ -46,7 +46,7 @@ export const KnockEntrySchema = z.object({
     role: z.string(),
     intent: z.string(),
     descriptor: DescriptorSchema,
-    status: z.enum(['pending', 'approved', 'claimed', 'expired']),
+    status: z.enum(['pending', 'approved', 'claimed', 'expired', 'rejected']),
     createdAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
 });
@@ -58,6 +58,12 @@ export const KnockListSchema = z.object({
 export const ApproveResponseSchema = z.object({
     id: z.string(),
     status: z.literal('approved'),
+    message: z.string(),
+});
+
+export const RejectResponseSchema = z.object({
+    id: z.string(),
+    status: z.literal('rejected'),
     message: z.string(),
 });
 
@@ -85,5 +91,6 @@ export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 export type KnockEntry = z.infer<typeof KnockEntrySchema>;
 export type KnockList = z.infer<typeof KnockListSchema>;
 export type ApproveResponse = z.infer<typeof ApproveResponseSchema>;
+export type RejectResponse = z.infer<typeof RejectResponseSchema>;
 export type Health = z.infer<typeof HealthSchema>;
 export type Descriptor = z.infer<typeof DescriptorSchema>;
