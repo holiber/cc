@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Rebuild node-pty (native)
+        run: pnpm rebuild node-pty
+
       - name: Install Playwright browsers
         run: pnpm -C apps/dashboard exec playwright install --with-deps chromium
 
