@@ -3,7 +3,7 @@
 export type MessageType = 'text' | 'event' | 'progress' | 'artifact'
 export type ArtifactKind = 'image' | 'video' | 'markdown' | 'mdx' | 'typescript' | 'javascript'
 export type EventStatus = 'submitted' | 'working' | 'completed' | 'failed'
-export type SenderRole = 'user' | 'agent' | 'system' | 'stranger'
+export type SenderRole = 'user' | 'agent' | 'system' | 'stranger' | 'coder'
 export type MessageSource = 'github' | 'gitea' | 'email' | 'telegram' | 'mattermost'
 
 export interface Sender {

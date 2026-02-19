@@ -131,6 +131,7 @@ export const Messages: CollectionConfig = {
                 { label: 'Agent', value: 'agent' },
                 { label: 'System', value: 'system' },
                 { label: 'Stranger', value: 'stranger' },
+                { label: 'Coder', value: 'coder' },
             ],
         },
         {
@@ -154,6 +155,11 @@ export const Messages: CollectionConfig = {
             name: 'externalRef',
             type: 'text',
             unique: true,
+            index: true,
+        },
+        {
+            name: 'expiresAt',
+            type: 'date',
             index: true,
         },
         {

@@ -10,7 +10,7 @@ const DEV_ADMIN_EMAIL = process.env.CC_DEV_ADMIN_EMAIL || process.env.SEED_ADMIN
 interface SeedUser {
     email: string
     password: string
-    role: 'admin' | 'orchestrator' | 'worker'
+    role: 'admin' | 'orchestrator' | 'worker' | 'coder'
     displayName: string
     username: string
 }
@@ -36,6 +36,13 @@ const SEED_USERS: SeedUser[] = [
         role: 'worker',
         displayName: 'Worker',
         username: 'worker',
+    },
+    {
+        email: 'coder@cc.local',
+        password: SEED_PASSWORD,
+        role: 'coder',
+        displayName: 'Coder (local@127.0.0.1)',
+        username: 'coder',
     },
     {
         email: 'demo-admin@cc.local',
@@ -83,6 +90,8 @@ export const seedPlugin = () => {
 
                 payload.logger.info('🌱 Ensuring seed data...')
 
+                await cleanupExpiredMessages(payload)
+
                 const userIdsByEmail = await ensureUsers(payload)
                 await seedAvatars(payload)
 
@@ -90,9 +99,52 @@ export const seedPlugin = () => {
                 const projectIdsBySlug = await ensureProjects(payload, userIdsByEmail)
                 await ensureMessages(payload, { demoAdminId, projectIdsBySlug })
 
+                // Best-effort TTL cleanup (auto-delete expired Messages).
+                // Run periodically; timer is unref'd so it won't block shutdown.
+                const t = setInterval(() => {
+                    void cleanupExpiredMessages(payload)
+                }, 10 * 60_000)
+                ;(t as any).unref?.()
+
                 payload.logger.info('🌱 Seed ensure complete.')
             },
         }
+    }
+}
+
+async function cleanupExpiredMessages(payload: Payload) {
+    const nowIso = new Date().toISOString()
+    const batchSize = 50
+
+    for (let i = 0; i < 10; i++) {
+        const res = await payload.find({
+            collection: 'messages',
+            limit: batchSize,
+            where: {
+                expiresAt: {
+                    less_than: nowIso,
+                },
+            },
+            depth: 0,
+        })
+        if (res.totalDocs === 0) return
+
+        for (const doc of res.docs as any[]) {
+            const id = (doc as any)?.id
+            if (!id) continue
+            try {
+                await payload.delete({
+                    collection: 'messages',
+                    id,
+                    overrideAccess: true,
+                    disableTransaction: true,
+                })
+            } catch {
+                // ignore cleanup errors
+            }
+        }
+
+        if (res.totalDocs < batchSize) return
     }
 }
 

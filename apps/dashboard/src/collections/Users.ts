@@ -37,6 +37,7 @@ export const Users: CollectionConfig = {
                 { label: 'Admin', value: 'admin' },
                 { label: 'Orchestrator', value: 'orchestrator' },
                 { label: 'Worker', value: 'worker' },
+                { label: 'Coder', value: 'coder' },
             ],
         },
         {

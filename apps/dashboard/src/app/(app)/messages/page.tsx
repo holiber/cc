@@ -36,6 +36,7 @@ const roleColors: Record<SenderRole, string> = {
     agent: "from-purple-500 to-pink-500",
     system: "from-gray-500 to-gray-600",
     stranger: "from-orange-500 to-amber-500",
+    coder: "from-emerald-500 to-teal-500",
 };
 
 const roleBadgeColors: Record<SenderRole, string> = {
@@ -43,6 +44,7 @@ const roleBadgeColors: Record<SenderRole, string> = {
     agent: "bg-purple-500/20 text-purple-400 border-purple-500/30",
     system: "bg-gray-500/20 text-gray-400 border-gray-500/30",
     stranger: "bg-orange-500/15 text-orange-300 border-orange-500/30",
+    coder: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
 };
 
 const eventStatusConfig: Record<EventStatus, { icon: IconType; color: string; bg: string; label: string }> = {
