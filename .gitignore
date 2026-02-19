@@ -30,9 +30,12 @@ Thumbs.db
 .env.*.local
 
 # Test output
-test-results/
-playwright-report/
-playwright/
+/test-results/
+/playwright-report/
+/playwright/
+
+# Playwright auth artifacts (source folder lives in apps/dashboard/playwright/)
+apps/dashboard/playwright/.auth/
 
 # Test data (auto-created by scripts/test.mjs)
 .cache/
