@@ -1,0 +1,56 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+:root {
+  --background: #0f0f23;
+  --foreground: #e0e0e0;
+  --node-planned: #4a5568;
+  --node-in-progress: #3182ce;
+  --node-done: #38a169;
+  --node-text: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* React Flow dark theme overrides */
+.react-flow__background {
+  background-color: var(--background) !important;
+}
+
+.react-flow__controls button {
+  background-color: #1a1a2e !important;
+  border-color: #333 !important;
+}
+
+.react-flow__controls button:hover {
+  background-color: #2a2a4e !important;
+}
+
+/* Dockview: hide tab close buttons (non-closable panels) */
+.dockview-theme-dark .dv-default-tab-action {
+  display: none !important;
+}
+
+/* Dockview: border/separator color to match project default (white/10) */
+.dockview-theme-dark .dv-resize-container>.dv-resize-handle-border {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.dockview-theme-dark .dv-tabs-container {
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.dockview-theme-dark .split-view-container>.sash-container>.sash {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}

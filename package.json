@@ -1,0 +1,27 @@
+{
+  "name": "command-center",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -F @command-center/dashboard dev",
+    "build": "pnpm -F @command-center/dashboard build",
+    "lint": "pnpm -F @command-center/dashboard lint",
+    "storybook": "pnpm -F @command-center/dashboard storybook",
+    "test": "node scripts/test.mjs",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:unit": "pnpm -F @command-center/client test",
+    "test:ui": "pnpm -F @command-center/dashboard test:ui",
+    "pw:ui": "node scripts/e2e.mjs -- --ui",
+    "pw:trace": "node scripts/show-trace.mjs"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "http-proxy": "^1.18.1",
+    "node-pty": "^1.1.0",
+    "ws": "^8.19.0"
+  }
+}
