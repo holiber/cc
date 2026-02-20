@@ -1,10 +1,9 @@
 import { Elysia } from 'elysia';
 import {
-    KnockRequestSchema, KnockResponseSchema,
-    ClaimRequestSchema, TokenResponseSchema,
-    KnockListSchema, ApproveResponseSchema, RejectResponseSchema,
-    HealthSchema, ErrorSchema,
-    SendMessageSchema, SendMessageResponseSchema,
+    KnockRequestSchema,
+    ClaimRequestSchema,
+    HealthSchema,
+    SendMessageSchema,
 } from './schemas';
 import {
     checkRateLimit, createKnock, claimKnock,
@@ -116,7 +115,6 @@ const app = new Elysia()
             message: 'Knock approved.',
         };
     }, {
-        response: ApproveResponseSchema,
         detail: {
             summary: 'Approve a knock request',
             description: 'Approve a pending knock request so the agent can claim a token.',
@@ -144,7 +142,6 @@ const app = new Elysia()
             message: 'Knock rejected.',
         };
     }, {
-        response: RejectResponseSchema,
         detail: {
             summary: 'Reject a knock request',
             description: 'Reject a pending knock request so it cannot be claimed.',

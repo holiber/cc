@@ -1,15 +1,28 @@
 {
     "name": "@command-center/client",
     "version": "0.1.0",
-    "private": true,
-    "main": "./src/index.ts",
-    "types": "./src/index.ts",
-    "bin": {
-        "reporter": "./src/cli.ts",
-        "cc-mcp": "./src/mcp.ts"
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./callApi": {
+            "types": "./dist/callApi.d.ts",
+            "import": "./dist/callApi.js"
+        }
     },
+    "bin": {
+        "cc-cli": "./dist/cli.js",
+        "cc-mcp": "./dist/mcp.js"
+    },
+    "files": [
+        "dist"
+    ],
     "scripts": {
-        "build": "echo 'stub - no build step yet'",
+        "build": "tsup",
         "test": "vitest run",
         "test:watch": "vitest"
     },
@@ -25,7 +38,9 @@
     "devDependencies": {
         "@types/ws": "^8.18.1",
         "@types/yargs": "^17.0.33",
+        "tsup": "^8.5.1",
         "tsx": "^4.19.0",
+        "typescript": "^5.9.3",
         "vitest": "^3.0.0"
     }
 }

@@ -1,4 +1,3 @@
-#!/usr/bin/env tsx
 /**
  * CommandCenter CLI — fully auto-generated from apiRoutes.
  *
@@ -92,8 +91,8 @@ function registerRoutes(cli: any): any {
         cli = cli.command(
             name,
             route.summary,
-            (y) => y.options(opts).epilog(route.description),
-            (argv) => {
+            (y: any) => y.options(opts).epilog(route.description),
+            (argv: any) => {
                 run(() => callApi(argv.url as string, route, argv as Record<string, unknown>));
             },
         );
@@ -101,7 +100,7 @@ function registerRoutes(cli: any): any {
 
     // Register grouped subcommands (e.g., admin knocks, admin approve)
     for (const [prefix, names] of grouped) {
-        cli = cli.command(prefix, `${prefix.charAt(0).toUpperCase() + prefix.slice(1)} commands`, (y) => {
+        cli = cli.command(prefix, `${prefix.charAt(0).toUpperCase() + prefix.slice(1)} commands`, (y: any) => {
             let sub = y;
             for (const fullName of names) {
                 const subName = fullName.slice(prefix.length + 1);
@@ -112,8 +111,8 @@ function registerRoutes(cli: any): any {
                 sub = sub.command(
                     subName,
                     route.summary,
-                    (yy) => yy.options(opts).epilog(route.description),
-                    (argv) => {
+                    (yy: any) => yy.options(opts).epilog(route.description),
+                    (argv: any) => {
                         run(() => callApi(argv.url as string, route, argv as Record<string, unknown>));
                     },
                 );

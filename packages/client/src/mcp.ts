@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * CommandCenter MCP Server — fully auto-generated from apiRoutes.
  *
