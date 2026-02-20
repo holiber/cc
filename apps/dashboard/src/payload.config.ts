@@ -41,6 +41,7 @@ export default buildConfig({
         client: {
             url: `file:${path.join(dataDir, 'cc.db')}`,
         },
+        push: true,
     }),
     editor: lexicalEditor(),
     typescript: {
