@@ -70,6 +70,7 @@ export async function GET() {
 
         return NextResponse.json({ success: true, results })
     } catch (e) {
-        return NextResponse.json({ success: false, error: e.message })
+        const msg = e instanceof Error ? e.message : String(e)
+        return NextResponse.json({ success: false, error: msg })
     }
 }

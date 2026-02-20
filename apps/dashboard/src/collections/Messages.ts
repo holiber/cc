@@ -1,4 +1,5 @@
 import type { CollectionConfig } from 'payload'
+import { getMessageBus } from '../realtime/messageBus'
 
 function isAdmin(req: any): boolean {
     return req?.user?.role === 'admin'
@@ -36,6 +37,26 @@ export const Messages: CollectionConfig = {
         defaultColumns: ['createdAt', 'type', 'fromName', 'broadcastToAdmins'],
     },
     hooks: {
+        afterChange: [
+            async ({ doc, operation }) => {
+                const bus = getMessageBus()
+                bus.emit({
+                    type: operation === 'create' ? 'message.created' : 'message.updated',
+                    doc,
+                    timestamp: new Date().toISOString(),
+                })
+            },
+        ],
+        afterDelete: [
+            async ({ doc }) => {
+                const bus = getMessageBus()
+                bus.emit({
+                    type: 'message.deleted',
+                    doc,
+                    timestamp: new Date().toISOString(),
+                })
+            },
+        ],
         beforeChange: [
             async ({ data, req }) => {
                 if (!data || !req?.payload) return data
@@ -70,18 +91,18 @@ export const Messages: CollectionConfig = {
         delete: ({ req }) => isAdmin(req),
         read: ({ req }) => {
             if (!req.user) return false
-            const userId = req.user.id
+            const userId = String(req.user.id)
             if (isAdmin(req)) {
                 return {
                     or: [
                         { broadcastToAdmins: { equals: true } },
                         { toUsers: { contains: userId } },
                     ],
-                }
+                } as any
             }
             return {
                 toUsers: { contains: userId },
-            }
+            } as any
         },
     },
     fields: [

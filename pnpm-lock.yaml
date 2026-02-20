@@ -14,9 +14,9 @@ importers:
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1
-      node-pty:
-        specifier: ^1.1.0
-        version: 1.1.0
+      jabterm:
+        specifier: https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz
+        version: https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz(react@19.2.4)
       ws:
         specifier: ^8.19.0
         version: 8.19.0
@@ -54,9 +54,6 @@ importers:
       '@payloadcms/richtext-lexical':
         specifier: ^3.77.0
         version: 3.77.0(@faceless-ui/modal@3.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@faceless-ui/scroll-info@2.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@payloadcms/next@3.77.0(@types/react@19.2.14)(graphql@16.12.0)(monaco-editor@0.55.1)(next@16.1.6(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(sass@1.77.4))(payload@3.77.0(graphql@16.12.0)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(@types/react@19.2.14)(monaco-editor@0.55.1)(next@16.1.6(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(sass@1.77.4))(payload@3.77.0(graphql@16.12.0)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)(yjs@13.6.29)
-      '@xterm/addon-fit':
-        specifier: ^0.11.0
-        version: 0.11.0
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
@@ -78,6 +75,9 @@ importers:
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1
+      jabterm:
+        specifier: https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz
+        version: https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz(react@19.2.4)
       next:
         specifier: 16.1.6
         version: 16.1.6(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(sass@1.77.4)
@@ -3930,6 +3930,16 @@ packages:
   iterator.prototype@1.1.5:
     resolution: {integrity: sha512-H0dkQoCa3b2VEeKQBOxFph+JAbcrQdE7KC0UkqwpLmv2EC4P41QXP+rqo9wYodACiG5/WM5s9oDApTU8utwj9g==}
     engines: {node: '>= 0.4'}
+
+  jabterm@https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz:
+    resolution: {integrity: sha512-beoIMSFGolrRk6e6TpyjER2Oe44Gms3RJ5C7elSdynkB8FNexGQuBrPWJx+hFhJ8R7eA7h8+Wk7SHRkxDiPBbw==, tarball: https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz}
+    version: 0.1.0
+    hasBin: true
+    peerDependencies:
+      react: '>=18'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   jest-worker@27.5.1:
     resolution: {integrity: sha512-7vuh85V5cdDofPyxn58nrPjBktZo0u9x1g8WtjQol+jZDaE+fhN+cIvTj11GndBnMnyfrUOG1sZQxCdjKh+DKg==}
@@ -9494,6 +9504,18 @@ snapshots:
       get-proto: 1.0.1
       has-symbols: 1.1.0
       set-function-name: 2.0.2
+
+  jabterm@https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz(react@19.2.4):
+    dependencies:
+      '@xterm/addon-fit': 0.11.0
+      '@xterm/xterm': 6.0.0
+      node-pty: 1.1.0
+      ws: 8.19.0
+    optionalDependencies:
+      react: 19.2.4
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   jest-worker@27.5.1:
     dependencies:

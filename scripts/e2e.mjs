@@ -5,7 +5,7 @@
  * Why: on dev machines, 3222/3223 can be busy due to other projects.
  * This script picks free high ports and exports them via env so both:
  * - Next dev server (apps/dashboard/server.mjs)
- * - terminal WS server (scripts/terminal-server.mjs)
+ * - terminal WS server (jabterm-server via playwright webServer)
  * start on non-conflicting ports.
  *
  * Usage:

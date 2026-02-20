@@ -23,9 +23,9 @@
     "tailwindcss": "^4.2.0"
   },
   "dependencies": {
+    "jabterm": "https://github.com/holiber/jabterm/releases/download/v0.1.0/jabterm-0.1.0.tgz",
     "dotenv": "^17.3.1",
     "http-proxy": "^1.18.1",
-    "node-pty": "^1.1.0",
     "ws": "^8.19.0"
   }
 }

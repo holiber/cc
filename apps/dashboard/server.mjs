@@ -14,8 +14,10 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import apiAppMod from '@command-center/api/app';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createTerminalProxy } from 'jabterm/server';
 import apiStoreMod from '@command-center/api/store';
+import * as messageBus from './src/realtime/messageBus.ts';
 
 config({ path: '.env' });
 
@@ -344,11 +346,58 @@ async function handleApiRequest(req, res) {
     await sendFetchResponse(res, fetchRes);
 }
 
+function normalizeRelIds(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return value
+            .map((v) => (typeof v === 'string' ? v : v && typeof v === 'object' ? v.id : undefined))
+            .filter((v) => typeof v === 'string' && v.length > 0);
+    }
+    if (typeof value === 'string') return [value];
+    if (typeof value === 'object' && value && typeof value.id === 'string') return [value.id];
+    return [];
+}
+
+async function fetchMeFromCookies(cookieHeader) {
+    const url = `http://127.0.0.1:${port}/api/users/me`;
+    const res = await fetch(url, {
+        headers: cookieHeader ? { cookie: cookieHeader } : {},
+    });
+    if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
+    const meUser = json && typeof json === 'object' ? (json.user ?? json) : null;
+    const id = meUser && typeof meUser === 'object' ? String(meUser.id || '') : '';
+    if (!id) return null;
+    return {
+        id,
+        role: String(meUser.role || ''),
+    };
+}
+
+function getMessageBusSafe() {
+    const fn =
+        messageBus.getMessageBus
+        ?? (messageBus.default && messageBus.default.getMessageBus)
+        ?? messageBus.default;
+    if (typeof fn !== 'function') {
+        throw new Error('messageBus.getMessageBus is not available');
+    }
+    return fn();
+}
+
+function getTerminalWsTarget() {
+    const parsed = Number.parseInt(process.env.NEXT_PUBLIC_TERMINAL_WS_PORT || '3223', 10);
+    const port = Number.isFinite(parsed) && parsed > 0 ? parsed : 3223;
+    return `ws://127.0.0.1:${port}`;
+}
+
 app.prepare().then(() => {
     // Must be called after prepare()
     const nextUpgradeHandler = app.getUpgradeHandler();
 
     const wss = new WebSocketServer({ noServer: true });
+    const wssMessages = new WebSocketServer({ noServer: true });
+    const wssTerminal = createTerminalProxy({ upstreamUrl: getTerminalWsTarget() });
 
     wss.on('connection', (socket) => {
         socket.send(JSON.stringify({ ok: true, event: 'connected', data: { hint: 'Send {method, args} JSON lines.' } }));
@@ -437,6 +486,48 @@ app.prepare().then(() => {
         });
     });
 
+    wssMessages.on('connection', async (socket, req) => {
+        try {
+            const cookie = req?.headers?.cookie || '';
+            const me = await fetchMeFromCookies(cookie);
+            if (!me) {
+                try { socket.close(4401, 'Unauthorized'); } catch { /* ignore */ }
+                return;
+            }
+
+            const isAdmin = me.role === 'admin';
+            const bus = getMessageBusSafe();
+
+            const unsubscribe = bus.on((event) => {
+                try {
+                    const doc = event?.doc;
+                    const toUsers = normalizeRelIds(doc?.toUsers);
+                    const broadcastToAdmins = !!doc?.broadcastToAdmins;
+
+                    const canRead = isAdmin
+                        ? (broadcastToAdmins || toUsers.includes(me.id))
+                        : toUsers.includes(me.id);
+
+                    if (!canRead) return;
+                    socket.send(JSON.stringify({ type: event.type, data: { doc }, ts: event.timestamp }));
+                } catch {
+                    // ignore
+                }
+            });
+
+            socket.on('close', () => unsubscribe());
+            socket.on('error', () => unsubscribe());
+
+            try {
+                socket.send(JSON.stringify({ type: 'meta.connected', data: { userId: me.id, role: me.role } }));
+            } catch {
+                // ignore
+            }
+        } catch {
+            try { socket.close(1011, 'Internal error'); } catch { /* ignore */ }
+        }
+    });
+
     const server = createServer(async (req, res) => {
         try {
             if (req.url && (req.url === '/api/v1' || req.url.startsWith('/api/v1/'))) {
@@ -456,6 +547,18 @@ app.prepare().then(() => {
     server.on('upgrade', (req, socket, head) => {
         try {
             const url = new URL(req.url ?? '', `http://${req.headers.host ?? 'localhost'}`);
+            if (url.pathname === '/ws/messages') {
+                wssMessages.handleUpgrade(req, socket, head, (ws) => {
+                    wssMessages.emit('connection', ws, req);
+                });
+                return;
+            }
+            if (url.pathname === '/ws/terminal') {
+                wssTerminal.handleUpgrade(req, socket, head, (ws) => {
+                    wssTerminal.emit('connection', ws, req);
+                });
+                return;
+            }
             if (url.pathname === '/connect' || url.pathname === '/api/v1/connect') {
                 wss.handleUpgrade(req, socket, head, (ws) => {
                     wss.emit('connection', ws, req);

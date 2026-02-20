@@ -1,18 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import XtermView from "./XtermView";
+import { JabTerm } from "jabterm/react";
+import "@xterm/xterm/css/xterm.css";
 import { FiPlus, FiX, FiTerminal } from "react-icons/fi";
-
-const TERMINAL_WS_PORT = process.env.NEXT_PUBLIC_TERMINAL_WS_PORT || '3223';
-
-function getTerminalWsUrl() {
-    if (typeof window === 'undefined') return `ws://localhost:${TERMINAL_WS_PORT}`;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Connect directly to the dedicated terminal WS port.
-    // This avoids WS proxy flakiness and keeps the terminal stable in dev/E2E.
-    return `${protocol}//${window.location.hostname}:${TERMINAL_WS_PORT}`;
-}
+import { getTerminalWsUrl } from "@/lib/terminalWsUrl";
 
 interface TerminalTab {
     id: string;
@@ -51,8 +43,6 @@ export default function TerminalManager({ isOpen, height = 300 }: TerminalManage
     if (!isOpen) return null;
 
     return (
-        // Note: the outer 'div' with height is managed by the parent (command-center page).
-        // This component fills its container using h-full.
         <div className="flex flex-col h-full w-full bg-[#1e1e1e]">
             {/* Tabs Header */}
             <div className="flex items-center bg-[#252526] overflow-x-auto h-[35px] shrink-0 border-b border-[#1e1e1e]">
@@ -93,9 +83,9 @@ export default function TerminalManager({ isOpen, height = 300 }: TerminalManage
                 ) : (
                     tabs.map(tab => (
                         <div key={tab.id} className={`absolute inset-0 ${activeTabId === tab.id ? 'block' : 'hidden'}`}>
-                            <XtermView
+                            <JabTerm
                                 wsUrl={getTerminalWsUrl()}
-                                active={activeTabId === tab.id}
+                                fontSize={11}
                                 onTitleChange={(t) => {
                                     setTabs(prev => prev.map(pt => pt.id === tab.id ? { ...pt, title: t } : pt));
                                 }}

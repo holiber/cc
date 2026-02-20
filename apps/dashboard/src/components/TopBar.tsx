@@ -12,6 +12,8 @@ import BurgerMenu from "@/components/BurgerMenu";
 import Footer from "@/components/Footer";
 import TerminalManager from "@/components/terminal/TerminalManager";
 import { NAV_ITEMS } from "@/components/navConfig";
+import { subscribeMessagesFeed } from "@/realtime/messagesFeed";
+import { getUnreadState, subscribeUnreadChanges } from "@/realtime/unreadState";
 
 const SIDEBAR_WIDTH = 224; // w-56 = 14rem = 224px
 const DEFAULT_OPENCODE_WIDTH = 440;
@@ -39,7 +41,7 @@ function getPageMeta(pathname: string): PageMeta {
 }
 
 type NotificationToast = {
-    knockId: string;
+    id: string;
     subject: string;
     fromName: string;
     createdAt: string;
@@ -60,13 +62,26 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
     const mailRef = useRef<HTMLDivElement | null>(null);
     const [mailAnchor, setMailAnchor] = useState<{ top: number; right: number } | null>(null);
 
-    const [isAdmin, setIsAdmin] = useState(false);
-    const [pendingNotifications, setPendingNotifications] = useState<NotificationToast[]>([]);
     const [notificationToasts, setNotificationToasts] = useState<NotificationToast[]>([]);
     const seenNotificationsRef = useRef<Set<string>>(new Set());
     const toastTimersRef = useRef<Map<string, number>>(new Map());
 
-    const unread = pendingNotifications.length;
+    const [feed, setFeed] = useState<{ ready: boolean; userId: string | null; docs: any[] }>({ ready: false, userId: null, docs: [] });
+    const [unreadTick, setUnreadTick] = useState(0);
+
+    const unread = useMemo(() => {
+        const userId = feed.userId;
+        if (!userId) return 0;
+        const { lastReadAtMs, forcedUnreadIds } = getUnreadState(userId);
+        const last = lastReadAtMs || 0;
+        let n = 0;
+        for (const d of feed.docs) {
+            const id = d?.id ? String(d.id) : "";
+            const createdAtMs = typeof d?.createdAt === "string" ? new Date(d.createdAt).getTime() : 0;
+            if ((createdAtMs > last) || (id && forcedUnreadIds.has(id))) n++;
+        }
+        return n;
+    }, [feed.docs, feed.userId, unreadTick]);
 
     const toastStyle = useMemo(() => ({
         position: "fixed" as const,
@@ -94,100 +109,58 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    const dismissToast = useCallback((knockId: string) => {
-        setNotificationToasts((prev) => prev.filter((t) => t.knockId !== knockId));
-        const timer = toastTimersRef.current.get(knockId);
+    const dismissToast = useCallback((id: string) => {
+        setNotificationToasts((prev) => prev.filter((t) => t.id !== id));
+        const timer = toastTimersRef.current.get(id);
         if (timer) {
             window.clearTimeout(timer);
-            toastTimersRef.current.delete(knockId);
+            toastTimersRef.current.delete(id);
         }
     }, []);
 
     useEffect(() => {
-        let cancelled = false;
-        let inflight = false;
-        const isE2E = typeof navigator !== "undefined" && (navigator as any).webdriver === true;
-
-        async function tick() {
-            if (cancelled || inflight) return;
-            inflight = true;
-            try {
-                const meRes = await fetch("/api/users/me", { credentials: "include" });
-                if (!meRes.ok) return;
-                const meJson: any = await meRes.json();
-                const meUser = meJson?.user ?? meJson;
-                const role = meUser?.role;
-                const admin = role === "admin";
-                if (!cancelled) setIsAdmin(admin);
-                if (!admin) {
-                    if (!cancelled) {
-                        setPendingNotifications([]);
-                        setNotificationToasts([]);
-                    }
-                    return;
-                }
-
-                const params = new URLSearchParams();
-                params.set("limit", "25");
-                params.set("sort", "-createdAt");
-                params.set("depth", "0");
-                params.set("where[broadcastToAdmins][equals]", "true");
-                params.set("where[event.status][equals]", "submitted");
-                params.set("where[event.taskName][equals]", "Knock request");
-
-                const res = await fetch(`/api/messages?${params.toString()}`, { credentials: "include" });
-                if (!res.ok) return;
-                const json: any = await res.json();
-                const docs: any[] = Array.isArray(json?.docs) ? json.docs : [];
-
-                const nextPending: NotificationToast[] = docs
-                    .map((d) => {
-                        const externalRef = typeof d?.externalRef === "string" ? d.externalRef : "";
-                        const knockId = externalRef.startsWith("knock:") ? externalRef.slice("knock:".length) : "";
-                        if (!knockId) return null;
-                        return {
-                            knockId,
-                            subject: String(d?.subject ?? "Knock request"),
-                            fromName: String(d?.fromName ?? "Stranger"),
-                            createdAt: String(d?.createdAt ?? ""),
-                        } satisfies NotificationToast;
-                    })
-                    .filter(Boolean) as NotificationToast[];
-
-                if (!cancelled) setPendingNotifications(nextPending);
-
-                for (const k of nextPending) {
-                    if (seenNotificationsRef.current.has(k.knockId)) continue;
-                    seenNotificationsRef.current.add(k.knockId);
-                    if (cancelled) break;
-
-                    setNotificationToasts((prev) => [k, ...prev].slice(0, 3));
-                    const t = window.setTimeout(() => dismissToast(k.knockId), 20_000);
-                    toastTimersRef.current.set(k.knockId, t);
-                }
-            } finally {
-                inflight = false;
-            }
-        }
-
-        tick();
-        if (isE2E) {
-            // Avoid background polling in Playwright; tests should explicitly reload/refresh.
-            return () => {
-                cancelled = true;
-                for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
-                toastTimersRef.current.clear();
-            };
-        }
-
-        const timer = window.setInterval(tick, 3000);
+        const unsubFeed = subscribeMessagesFeed((s) => {
+            setFeed({ ready: s.ready, userId: s.userId, docs: s.docs });
+        });
+        const unsubUnread = subscribeUnreadChanges(() => setUnreadTick((v) => v + 1));
         return () => {
-            cancelled = true;
-            window.clearInterval(timer);
+            unsubFeed();
+            unsubUnread();
             for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
             toastTimersRef.current.clear();
         };
     }, [dismissToast]);
+
+    // Toasts: show a few most recent unread messages (primed by initial fetch + WS).
+    useEffect(() => {
+        const userId = feed.userId;
+        if (!userId) return;
+        const { lastReadAtMs, forcedUnreadIds } = getUnreadState(userId);
+        const last = lastReadAtMs || 0;
+        const unreadDocs = feed.docs
+            .map((d) => {
+                const id = d?.id ? String(d.id) : "";
+                const createdAt = String(d?.createdAt ?? "");
+                const createdAtMs = createdAt ? new Date(createdAt).getTime() : 0;
+                const isUnread = (createdAtMs > last) || (id && forcedUnreadIds.has(id));
+                if (!isUnread || !id) return null;
+                return {
+                    id,
+                    subject: String(d?.subject ?? "Message"),
+                    fromName: String(d?.fromName ?? "Unknown"),
+                    createdAt,
+                } satisfies NotificationToast;
+            })
+            .filter(Boolean) as NotificationToast[];
+
+        for (const t of unreadDocs.slice(0, 3)) {
+            if (seenNotificationsRef.current.has(t.id)) continue;
+            seenNotificationsRef.current.add(t.id);
+            setNotificationToasts((prev) => [t, ...prev].slice(0, 3));
+            const timer = window.setTimeout(() => dismissToast(t.id), 20_000);
+            toastTimersRef.current.set(t.id, timer);
+        }
+    }, [dismissToast, feed.docs, feed.userId, unreadTick]);
 
     // If another part of the app approves/rejects a knock, update badge/toasts immediately
     // without relying on polling (useful in E2E where polling is disabled).
@@ -196,7 +169,7 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
             const detail = (e as CustomEvent<any>)?.detail;
             const knockId = typeof detail?.knockId === "string" ? detail.knockId : "";
             if (!knockId) return;
-            setPendingNotifications((prev) => prev.filter((p) => p.knockId !== knockId));
+            // No special pending-knock state; keep for backward compatibility (dismiss any toast by id if present).
             dismissToast(knockId);
         }
         window.addEventListener("cc:knock-action", onKnockAction as any);
@@ -387,11 +360,11 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                 </AnimatePresence>
             </motion.div>
 
-            {/* Toast notifications (admin only) */}
+            {/* Toast notifications */}
             <AnimatePresence>
-                {isAdmin && notificationToasts.length > 0 && (
+                {notificationToasts.length > 0 && (
                     <motion.div
-                        data-testid="knock-toast-container"
+                        data-testid="notification-toast-container"
                         style={toastStyle as any}
                         initial={{ opacity: 0, y: -6 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -400,9 +373,9 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                     >
                         {notificationToasts.map((t) => (
                             <motion.div
-                                key={t.knockId}
-                                data-testid="knock-toast"
-                                data-knock-id={t.knockId}
+                                key={t.id}
+                                data-testid="notification-toast"
+                                data-message-id={t.id}
                                 initial={{ opacity: 0, y: -6 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -6 }}
@@ -411,7 +384,7 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                                 <div className="flex items-start gap-2">
                                     <Link
                                         href="/messages"
-                                        onClick={() => dismissToast(t.knockId)}
+                                        onClick={() => dismissToast(t.id)}
                                         className="flex-1 min-w-0 cursor-pointer"
                                         title="Open messages"
                                     >
@@ -420,7 +393,7 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                                         <div className="text-[10px] text-gray-500 mt-1">Open to view details</div>
                                     </Link>
                                     <button
-                                        onClick={() => dismissToast(t.knockId)}
+                                        onClick={() => dismissToast(t.id)}
                                         className="text-gray-500 hover:text-white p-1 rounded hover:bg-white/10 cursor-pointer"
                                         aria-label="Dismiss notification"
                                     >

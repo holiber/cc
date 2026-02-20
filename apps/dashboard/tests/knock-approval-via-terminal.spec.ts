@@ -23,10 +23,43 @@ async function loginAsDemoAdmin(page: any, request: any, baseURL: string) {
         sameSite: 'Lax',
         expires: -1,
     }]);
+
+    return String(token);
+}
+
+async function clearPendingKnocks(request: any, token: string) {
+    const cookie = `payload-token=${encodeURIComponent(token)}`;
+
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    params.set('sort', '-createdAt');
+    params.set('depth', '0');
+    params.set('where[broadcastToAdmins][equals]', 'true');
+    params.set('where[event.status][equals]', 'submitted');
+    params.set('where[event.taskName][equals]', 'Knock request');
+
+    const res = await request.get(`/api/messages?${params.toString()}`, {
+        headers: { cookie },
+    });
+    if (!res.ok()) return;
+    const json: any = await res.json();
+    const docs: any[] = Array.isArray(json?.docs) ? json.docs : [];
+
+    const knockIds = docs
+        .map((d) => String(d?.externalRef ?? ''))
+        .filter((ref) => ref.startsWith('knock:'))
+        .map((ref) => ref.slice('knock:'.length))
+        .filter(Boolean);
+
+    for (const id of knockIds) {
+        await request.post(`/api/knocks/${encodeURIComponent(id)}/reject`, {
+            headers: { cookie },
+        }).catch(() => null);
+    }
 }
 
 async function runXtermCommand(page: any, cmd: string, waitForText?: string, timeoutMs = 120_000) {
-    const container = page.getByTestId('xterm-container');
+    const container = page.getByTestId('jabterm-container');
     await expect(container, 'xterm should be visible').toBeVisible({ timeout: 30_000 });
     await container.click({ position: { x: 10, y: 10 } });
     await page.waitForFunction(() => !!document.querySelector('.xterm-helper-textarea'), null, { timeout: 30_000 });
@@ -38,7 +71,7 @@ async function runXtermCommand(page: any, cmd: string, waitForText?: string, tim
     await page.keyboard.press('Enter');
 
     if (waitForText) {
-        await page.waitForFunction((t) => {
+        await page.waitForFunction((t: any) => {
             const el = document.querySelector('.xterm-rows');
             return !!el && (el.textContent || '').includes(String(t));
         }, waitForText, { timeout: timeoutMs });
@@ -48,10 +81,23 @@ async function runXtermCommand(page: any, cmd: string, waitForText?: string, tim
 test('demo-admin creates knocks via terminal; sees toast+badge; approves and disapproves', async ({ page, request, baseURL }) => {
     test.setTimeout(240_000);
 
-    await loginAsDemoAdmin(page, request, baseURL || '');
+    const token = await loginAsDemoAdmin(page, request, baseURL || '');
+    await clearPendingKnocks(request, token);
     await page.goto('/messages', { waitUntil: 'domcontentloaded' });
 
     // Terminal should be open by default on /messages and xterm should mount.
+    await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 30_000 });
+
+    // Ensure unread badge starts from a clean baseline (once), then reload to establish baseline "now".
+    await page.evaluate(() => {
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('cc:unread:')) localStorage.removeItem(k);
+            }
+        } catch { /* ignore */ }
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 30_000 });
 
     const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -82,12 +128,11 @@ test('demo-admin creates knocks via terminal; sees toast+badge; approves and dis
     await expect(page.getByTestId('messages-badge')).toHaveText('2', { timeout: 120_000 });
 
     // Toast notifications should appear and include action buttons.
-    const toast1 = page.getByTestId('knock-toast').filter({ hasText: subj1 });
-    const toast2 = page.getByTestId('knock-toast').filter({ hasText: subj2 });
+    const toast1 = page.getByTestId('notification-toast').filter({ hasText: subj1 });
+    const toast2 = page.getByTestId('notification-toast').filter({ hasText: subj2 });
     await expect(toast1.first()).toBeVisible({ timeout: 120_000 });
     await expect(toast2.first()).toBeVisible({ timeout: 120_000 });
-    await expect(toast1.getByTestId('knock-toast-approve')).toHaveCount(0);
-    await expect(toast1.getByTestId('knock-toast-reject')).toHaveCount(0);
+    // Actions are only in message detail.
 
     // Messages page should list both knocks (actions are only available in the detail pane).
     const item1 = page.locator('button', { hasText: subj1 }).first();

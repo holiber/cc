@@ -7,12 +7,14 @@ import {
     FiCheck, FiLoader, FiAlertCircle, FiSend, FiClock,
     FiChevronLeft, FiPaperclip, FiArrowRight,
     FiGithub, FiGitBranch, FiAtSign, FiMessageCircle, FiHash,
-    FiFolder,
+    FiFolder, FiEyeOff,
 } from "react-icons/fi";
 import type { IconType } from "react-icons";
 import {
     type MessageType, type ArtifactKind, type EventStatus, type SenderRole, type MessageSource,
 } from "@/data/mockMessages";
+import { subscribeMessagesFeed, refreshMessagesFeed } from "@/realtime/messagesFeed";
+import { getUnreadState, markAsUnread, markReadUpTo, subscribeUnreadChanges } from "@/realtime/unreadState";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -192,10 +194,12 @@ function MessageDetail({
     msg,
     canActOnKnock,
     onKnockAction,
+    onMarkUnread,
 }: {
     msg: UiMessage;
     canActOnKnock: boolean;
     onKnockAction: (knockId: string, action: "approve" | "reject") => void | Promise<void>;
+    onMarkUnread: (messageId: string) => void;
 }) {
     const isPendingKnock = !!msg.knockId && msg.event?.status === "submitted";
     return (
@@ -234,6 +238,15 @@ function MessageDetail({
                 {msg.subject && (
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-bold text-white">{msg.subject}</h2>
+                        <button
+                            type="button"
+                            onClick={() => onMarkUnread(msg.id)}
+                            className="ml-auto inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-white/10 bg-gray-800/50 text-gray-300 hover:bg-gray-800/70 cursor-pointer"
+                            title="Mark as unread"
+                        >
+                            <FiEyeOff className="w-3 h-3" />
+                            Mark as unread
+                        </button>
                         {msg.project && (
                             <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-white/10 bg-gray-800/50 text-gray-400">
                                 <FiFolder className="w-3 h-3 text-amber-400" />
@@ -511,99 +524,40 @@ function mapPayloadMessage(doc: any): UiMessage | null {
     };
 }
 
-function extractMeUser(meJson: any): { id: string; role: string } | null {
-    const candidates = [
-        meJson?.user,
-        meJson?.user?.user,
-        meJson,
-        meJson?.doc,
-        meJson?.data?.user,
-    ];
-
-    for (const c of candidates) {
-        if (!c || typeof c !== "object") continue;
-        const rawId = (c as any).id ?? (c as any)._id;
-        if (rawId) {
-            return {
-                id: String(rawId),
-                role: String((c as any).role ?? ""),
-            };
-        }
-    }
-    return null;
-}
-
 export default function MessagesPage() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterTab>("all");
     const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
     const mounted = useIsMounted();
-    const [messages, setMessages] = useState<UiMessage[]>([]);
+    const [docs, setDocs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [me, setMe] = useState<{ id: string; role: string } | null>(null);
+    const [unreadTick, setUnreadTick] = useState(0);
+
+    const messages = useMemo(() => {
+        const userId = me?.id ?? null;
+        const { lastReadAtMs, forcedUnreadIds } = userId ? getUnreadState(userId) : { lastReadAtMs: 0, forcedUnreadIds: new Set<string>() };
+        const last = lastReadAtMs || 0;
+        const mapped = docs.map(mapPayloadMessage).filter(Boolean) as UiMessage[];
+        return mapped.map((m) => {
+            const createdAtMs = m.timestamp.getTime();
+            const isUnread = (createdAtMs > last) || forcedUnreadIds.has(m.id);
+            return { ...m, read: !isUnread };
+        });
+    }, [docs, me?.id, unreadTick]);
 
     const unreadCount = useMemo(() => messages.filter(m => !m.read).length, [messages]);
 
-    const refresh = useCallback(async () => {
-        setLoading(true);
-        try {
-            const meRes = await fetch("/api/users/me", { credentials: "include" });
-            if (!meRes.ok) {
-                setMe(null);
-                setMessages([]);
-                return;
-            }
-            const meJson: any = await meRes.json().catch(() => null);
-            const meInfo = extractMeUser(meJson);
-            if (!meInfo) {
-                // Not logged in (often `{ user: null }`) or unexpected shape.
-                setMe(null);
-                setMessages([]);
-                return;
-            }
-            setMe(meInfo);
-
-            const params = new URLSearchParams();
-            params.set("limit", "200");
-            params.set("sort", "-createdAt");
-            params.set("depth", "1");
-            // Let Payload access control decide which docs are visible to this user.
-            // Avoid client-side role-based where-clauses that can accidentally filter out admin broadcasts.
-
-            const res = await fetch(`/api/messages?${params.toString()}`, { credentials: "include" });
-            if (!res.ok) throw new Error(`Failed to load /api/messages: ${res.status}`);
-            const json: any = await res.json();
-            const docs: any[] = Array.isArray(json?.docs) ? json.docs : [];
-            const mapped = docs.map(mapPayloadMessage).filter(Boolean) as UiMessage[];
-            setMessages(mapped);
-            setSelectedId((prev) => prev ?? (mapped[0]?.id ?? null));
-        } catch (e) {
-            console.error(e);
-            setMe(null);
-            setMessages([]);
-        } finally {
-            setLoading(false);
-        }
+    useEffect(() => {
+        const unsubFeed = subscribeMessagesFeed((s) => {
+            setDocs(s.docs);
+            if (s.userId && s.role) setMe({ id: s.userId, role: s.role });
+            if (!s.userId) setMe(null);
+            setLoading(!s.ready);
+        });
+        const unsubUnread = subscribeUnreadChanges(() => setUnreadTick((v) => v + 1));
+        return () => { unsubFeed(); unsubUnread(); };
     }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-        void (async () => {
-            if (cancelled) return;
-            await refresh();
-        })();
-        return () => { cancelled = true; };
-    }, [refresh]);
-
-    // Lightweight refresh so new events (e.g. knocks) show up without manual reload.
-    useEffect(() => {
-        const isE2E = typeof navigator !== "undefined" && (navigator as any).webdriver === true;
-        if (isE2E) return;
-        const t = window.setInterval(() => {
-            void refresh();
-        }, 4000);
-        return () => window.clearInterval(t);
-    }, [refresh]);
 
     const filteredMessages = useMemo(() =>
         filter === "all" ? messages : messages.filter(m => m.type === filter)
@@ -623,13 +577,21 @@ export default function MessagesPage() {
         if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("cc:knock-action", { detail: { knockId, action } }));
         }
-        await refresh();
-    }, [refresh]);
+        await refreshMessagesFeed();
+    }, []);
 
     const handleSelectMessage = (msg: UiMessage) => {
         setSelectedId(msg.id);
         setMobileDetailOpen(true);
+        if (me?.id) {
+            markReadUpTo(me.id, msg.timestamp.getTime(), msg.id);
+        }
     };
+
+    const handleMarkUnread = useCallback((messageId: string) => {
+        if (!me?.id) return;
+        markAsUnread(me.id, messageId);
+    }, [me?.id]);
 
     return (
         <main className="h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex flex-col overflow-hidden">
@@ -726,6 +688,7 @@ export default function MessagesPage() {
                                 msg={selectedMessage}
                                 canActOnKnock={!!canActOnKnock}
                                 onKnockAction={onKnockAction}
+                                onMarkUnread={handleMarkUnread}
                             />
                         ) : (
                             <EmptyDetail />

@@ -10,10 +10,8 @@
  *   1. Creates a fresh isolated data dir in .cache/cc-test-<timestamp>/
  *      (or reuses CC_DATA_DIR if already set)
  *   2. Runs Vitest (packages/client) — in-process, no server needed
- *   3. Starts the terminal WS server (scripts/terminal-server.mjs) on :3223
- *   4. Runs Playwright (apps/dashboard) — starts a fresh Next.js server via webServer
- *   5. Stops the terminal server
- *   6. Exits with combined status (non-zero if either suite fails)
+ *   3. Runs Playwright (apps/dashboard) — starts Next.js + jabterm-server via webServer config
+ *   4. Exits with combined status (non-zero if either suite fails)
  */
 
 import { execSync } from 'child_process';

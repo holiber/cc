@@ -1,90 +1,167 @@
 # CommandCenter Architecture
 
-This document describes the current architecture of the CommandCenter monorepo, with a focus on the **terminal subsystem** and the changes that were made to keep tests deterministic on developer machines where ports may already be in use.
+This document describes the current architecture of the CommandCenter monorepo. It focuses on:
+
+- The **dashboard runtime** (`Next.js` + `Payload`) and the custom dev gateway (`server.mjs`)
+- The **terminal subsystem** ([JabTerm](https://github.com/holiber/jabterm))
+- The **messages/knocks** domain, including realtime updates over WebSocket
+- The **test harness** that keeps E2E deterministic on developer machines where ports may already be in use
 
 ## Repository layout (high level)
 
 ```
 workflow-viz/
 ├── apps/
-│   └── dashboard/           # Next.js app + Payload CMS
+│   └── dashboard/                # Next.js app + Payload CMS + custom dev gateway
 ├── packages/
-│   ├── api/                 # API package
-│   └── client/              # Client library + vitest tests
+│   ├── api/                      # Elysia API (HTTP + WS methods)
+│   └── client/                   # Eden Treaty client + CLI + vitest tests
 ├── scripts/
-│   ├── e2e.mjs              # Playwright runner (dynamic ports)
-│   ├── show-trace.mjs       # Opens newest trace from cache
-│   ├── terminal-server.mjs  # Terminal WebSocket server (node-pty)
-│   └── test.mjs             # Unified runner (vitest + playwright)
-└── .cache/                  # Gitignored runtime artifacts
+│   ├── assert-no-long-sleeps.mjs  # Guardrail for tests
+│   ├── e2e.mjs                   # Playwright runner (dynamic ports + isolated cache/data)
+│   ├── generate-ws-asyncapi.mjs   # Build-time WS schema generation into .cache/
+│   ├── reset-dev-db.mjs          # Wipes local dev DB/media under .cache/
+│   ├── show-trace.mjs            # Opens newest trace from cache
+│   └── test.mjs                  # Unified runner (vitest + playwright)
+└── .cache/                       # Gitignored runtime artifacts (Next, Playwright, data, schema)
 ```
+
+## Runtime architecture
+
+### Dashboard: Next.js + Payload CMS
+
+- **Next.js app**: `apps/dashboard/` (App Router)
+- **Payload Admin UI**: `/admin/*`
+- **Payload REST API**: `/api/*` (e.g. `/api/users/me`, `/api/messages`)
+
+Payload collections relevant to app features:
+
+- **Messages**: `apps/dashboard/src/collections/Messages.ts`
+  - Access control: admins can read admin-broadcast docs; users read docs addressed to them (`toUsers`).
+  - Mentions: `@username` in `subject`/`text` is resolved to user ids and appended into `toUsers`.
+  - Realtime: `afterChange`/`afterDelete` hooks emit events into the in-process message bus.
+
+### Custom dev gateway (`apps/dashboard/server.mjs`)
+
+The dashboard runs via a wrapper entrypoint in dev:
+
+- **Entrypoint**: `apps/dashboard/server.mjs` (used by `pnpm dev`)
+- **Responsibilities**:
+  - Picks a usable dev port (warns & switches to an ephemeral port if busy).
+  - Moves Next build output into `.cache/` via `NEXT_DIST_DIR` to avoid writing into `apps/dashboard/`.
+  - Proxies `/api/v1/*` requests into the Elysia API via `app.fetch` (`@command-center/api/app`).
+  - Hosts WebSocket upgrade routes:
+    - `/connect` (Elysia-style method RPC channel)
+    - `/ws/messages` (dashboard realtime feed)
+    - `/ws/terminal` (same-origin bridge to local terminal server)
+  - Forwards HMR upgrades to Next’s internal handler.
+
+### Messages realtime pipeline (`/ws/messages`)
+
+**Server-side**
+
+- `apps/dashboard/src/realtime/messageBus.ts` is a singleton bus stored on `globalThis`.
+- `apps/dashboard/src/collections/Messages.ts` emits:
+  - `message.created`
+  - `message.updated`
+  - `message.deleted`
+- `apps/dashboard/server.mjs` exposes `/ws/messages` and:
+  - authenticates sockets by calling `/api/users/me` with the incoming cookie
+  - filters emitted events based on `broadcastToAdmins`/`toUsers`
+  - sends an initial meta envelope:
+    - `meta.connected { userId, role }`
+
+**Client-side**
+
+- `apps/dashboard/src/realtime/messagesSocket.ts` maintains a single resilient WS connection to `/ws/messages`
+- `apps/dashboard/src/realtime/messagesFeed.ts` provides a **shared client feed**:
+  - 1 initial `GET /api/messages?...`
+  - incremental updates from WS events
+- `apps/dashboard/src/realtime/unreadState.ts` stores unread cursor in `localStorage` keyed by WS `userId`:
+  - baseline is initialized on first connect
+  - opening a message marks it read
+  - “Mark as unread” is a **forced unread override by message id**
+
+### Knocks → messages
+
+Knock submission lives under API v1 (`/api/v1/knock`). For deterministic UX/tests, the gateway ensures
+an admin-visible message exists immediately:
+
+- When a knock is accepted by the API, `server.mjs` calls the internal dashboard route:
+  - `POST /api/internal/knock-message`
+
+Knock approval/rejection are handled by dashboard routes (`/api/knocks/:id/approve|reject`) which
+update the corresponding message’s event status.
+
+### WebSocket schema (“self-describing WS API”)
+
+- **Runtime endpoint** (source of truth):
+  - `GET /api/ws/schema` → `apps/dashboard/src/app/(app)/api/ws/schema/route.ts`
+  - returns an **AsyncAPI 2.6.0** JSON document for `/ws/messages`
+- **Build-time artifact**:
+  - `scripts/generate-ws-asyncapi.mjs` writes `.cache/asyncapi/ws-schema.json`
 
 ## Terminal subsystem
 
-### Terminal WebSocket server
+Terminal functionality is provided by [JabTerm](https://github.com/holiber/jabterm) — a standalone library extracted from this project.
 
-- **Entrypoint**: `scripts/terminal-server.mjs`
-- **Transport**: WebSocket (`ws`)
-- **PTY**: `node-pty` spawns `/bin/zsh` (macOS)
-- **Control messages**: JSON text frames, currently only `{ "type": "resize", "cols": number, "rows": number }`
-- **Input frames**: binary frames written to PTY stdin
+- **Server**: `jabterm/server` — Node.js WebSocket server powered by `node-pty`
+- **React component**: `jabterm/react` — drop-in `<JabTerm>` component
+- **Proxy**: `createTerminalProxy()` from `jabterm/server` bridges browser WS to local terminal server (used in `server.mjs` for HTTPS/Cloudflare setups)
 
-### Browser terminal UI
+### Integration in this project
 
-- `apps/dashboard/src/components/terminal/XtermView.tsx` renders xterm and connects a WebSocket.
-- `apps/dashboard/src/components/terminal/TerminalManager.tsx` constructs the WS URL.
-  - **Important**: the UI now connects **directly** to `NEXT_PUBLIC_TERMINAL_WS_PORT` instead of going through a Next.js WS proxy. This was the biggest stability win.
+- `apps/dashboard/src/components/terminal/TerminalManager.tsx` — tab management (app-specific), uses `<JabTerm>` from `jabterm/react`
+- `apps/dashboard/src/lib/terminalWsUrl.ts` — WS URL resolution (env vars, proxy/direct mode)
+- `apps/dashboard/server.mjs` — wires `createTerminalProxy()` for `/ws/terminal` upgrade path
+- Playwright config starts `jabterm-server` as a `webServer` for E2E tests
+
+For architecture details, protocol docs, and diagrams, see the [JabTerm ARCHITECTURE.md](https://github.com/holiber/jabterm/blob/main/docs/ARCHITECTURE.md).
 
 ## Testing architecture
 
-### Why terminal tests were flaky
+### Determinism strategy
 
-- In Next dev + React Strict Mode, effects can mount/unmount twice, which caused the terminal UI to print `Connection closed` during normal lifecycle churn.
-- Fixed ports (`3222`/`3223`) were fragile on a dev Mac where other projects may already be listening.
-- Terminal UI echo tests were inherently flaky because the WS can reconnect during page reloads/hydration and close with code `1006` even when the underlying PTY server is fine.
-
-### Strategy that made it deterministic
-
-1. **Dynamic ports for E2E**  
-   `scripts/e2e.mjs` selects free high ports (49152–65535) and exports:
-   - `PORT` / `BASE_URL` for Next dev server
-   - `NEXT_PUBLIC_TERMINAL_WS_PORT` / `TERMINAL_WS_URL` for the terminal WS server
-
-2. **All artifacts go into gitignored cache**  
-   - Next E2E build output: `.cache/next-e2e-<PORT>/` via `NEXT_DIST_DIR`
+1. **Dynamic ports for E2E**
+   - `scripts/e2e.mjs` allocates free high ports and exports:
+     - `PORT` / `BASE_URL` (Next dev server)
+     - `NEXT_PUBLIC_TERMINAL_WS_PORT` / `TERMINAL_WS_URL` (terminal WS server)
+2. **Isolated test data dir**
+   - `CC_DATA_DIR` is created under `.cache/cc-test-<timestamp>/` *before* Playwright starts `webServer`.
+3. **All artifacts under `.cache/`**
+   - `NEXT_DIST_DIR=../../.cache/next-e2e`
    - Playwright outputs: `.cache/playwright/{test-results,report,auth}/`
-   - Payload dev DB/media default: `.cache/data/dashboard/`
+4. **Guardrail: no long sleeps**
+   - `scripts/assert-no-long-sleeps.mjs` enforces a max sleep window in test code.
+5. **No parallel workers**
+   - `apps/dashboard/playwright.config.ts` defaults to `workers: 1` to avoid conflicts with open ports/PTYs.
 
-3. **Protocol tests are authoritative for echo/zombie checks**  
-   - `apps/dashboard/tests/terminal-echo.spec.ts` uses a `ws` client to assert echo round-trip.
-   - `apps/dashboard/tests/terminal-zombie.spec.ts` asserts PTY processes are killed on WS close.
+### Terminal tests (why UI screenshots are limited)
 
-4. **Avoid timing sleeps**  
-   Terminal specs use `waitForMatch(...)` instead of fixed `setTimeout` windows.
-
-5. **Reduce PTY parallelism**  
-   Terminal specs are configured serially to avoid `node-pty` flakiness under parallel workers.
-
-### Why you won’t see screenshots for most terminal tests in Playwright UI
-
-The protocol-level terminal tests don’t create a browser `page`, so there are no DOM snapshots or screenshots to show. The UI-side test is intentionally a **smoke check** (xterm mounts) rather than the source of truth for terminal correctness.
+Protocol-level terminal tests (`ws` client) don’t create a browser `page`, so Playwright UI won’t show DOM
+screenshots. The UI-side checks are intentionally smoke-level.
 
 ## Useful commands
 
-- Playwright UI:
-
 ```bash
+# full suite
+pnpm test
+
+# dashboard e2e only (dynamic ports)
+pnpm -F @command-center/dashboard test
+
+# playwright UI (loads artifacts under .cache/playwright/)
 pnpm pw:ui
-```
 
-- Open newest trace:
-
-```bash
+# open newest trace
 pnpm pw:trace
+
+# reset local dev db/media (under .cache/data/dashboard)
+pnpm dev:reset-db
 ```
 
-- Terminal tests only:
+## Deployment notes (common pitfalls)
 
-```bash
-pnpm test:e2e -- --grep terminal
-```
+- **Production should not run `next dev`**. Use `next build` + `next start` with `NODE_ENV=production`.
+- If the admin page renders blank with `ChunkLoadError` and browser logs `ERR_QUIC_PROTOCOL_ERROR`,
+  and you are behind Cloudflare, consider disabling **HTTP/3 (QUIC)** for the zone.

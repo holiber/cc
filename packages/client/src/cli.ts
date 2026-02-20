@@ -22,7 +22,7 @@ import {
     KnockRequestSchema,
     DescriptorSchema,
 } from '@command-center/api';
-import { createReporter } from './reporter';
+import { createClient } from './client';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ yargs(hideBin(process.argv))
         apiMeta.health.summary,
         { describe: { hidden: true, type: 'string', default: apiMeta.health.description } },
         (argv) => {
-            const r = createReporter(argv.url as string);
+            const r = createClient(argv.url as string);
             run(async () => {
                 const { data, error, status } = await r.health.get();
                 if (error) throw new Error(`Health check failed: ${status}`);
@@ -126,7 +126,7 @@ yargs(hideBin(process.argv))
             })
             .epilog(apiMeta.knock.description),
         (argv) => {
-            const r = createReporter(argv.url as string);
+            const r = createClient(argv.url as string);
             run(async () => {
                 const { data, error, status } = await r.knock.post({
                     name: argv.name as string,
@@ -151,7 +151,7 @@ yargs(hideBin(process.argv))
                 .option('secret', { type: 'string', demandOption: true, description: 'Secret used during knock' })
                 .epilog(apiMeta.claim.description),
         (argv) => {
-            const r = createReporter(argv.url as string);
+            const r = createClient(argv.url as string);
             run(async () => {
                 const { data, error, status } = await (r.knock as any)(
                     { id: argv['request-id'] as string },
@@ -175,7 +175,7 @@ yargs(hideBin(process.argv))
                         .option('status', { type: 'string', description: 'Filter by status (pending|approved|claimed|expired|rejected)' })
                         .epilog(apiMeta['admin.knocks'].description),
                 (argv) => {
-                    const r = createReporter(argv.url as string);
+                    const r = createClient(argv.url as string);
                     run(async () => {
                         const { data, error, status } = await r.admin.knocks.get({
                             query: { status: argv.status as string | undefined },
@@ -197,7 +197,7 @@ yargs(hideBin(process.argv))
                         .option('id', { type: 'string', demandOption: true, description: 'Knock request ID to approve' })
                         .epilog(apiMeta['admin.approve'].description),
                 (argv) => {
-                    const r = createReporter(argv.url as string);
+                    const r = createClient(argv.url as string);
                     run(async () => {
                         const { data, error, status } = await (r.admin.knocks as any)(
                             { id: argv.id as string },
@@ -218,7 +218,7 @@ yargs(hideBin(process.argv))
                         .option('id', { type: 'string', demandOption: true, description: 'Knock request ID to reject' })
                         .epilog(apiMeta['admin.reject'].description),
                 (argv) => {
-                    const r = createReporter(argv.url as string);
+                    const r = createClient(argv.url as string);
                     run(async () => {
                         const { data, error, status } = await (r.admin.knocks as any)(
                             { id: argv.id as string },
