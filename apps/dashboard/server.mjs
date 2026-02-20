@@ -195,11 +195,11 @@ if (dev) {
 // Default Next.js output into repo `.cache/` to avoid writing into apps/dashboard/.
 // If another dev server is running, avoid lock conflicts by using a per-port distDir.
 // (Tests set NEXT_DIST_DIR explicitly; this only applies when unset.)
-if (!process.env.NEXT_DIST_DIR || process.env.NEXT_DIST_DIR === '') {
+if (dev && (!process.env.NEXT_DIST_DIR || process.env.NEXT_DIST_DIR === '')) {
     const baseDistDir = '../../.cache/next-dev';
     const absBase = path.resolve(process.cwd(), baseDistDir);
     const lockPath = path.join(absBase, 'dev', 'lock');
-    if (dev && fs.existsSync(lockPath)) {
+    if (fs.existsSync(lockPath)) {
         const holderPid = findFileHolderPid(lockPath);
 
         if (!holderPid) {
