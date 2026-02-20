@@ -90,9 +90,27 @@ export const seedPlugin = () => {
 
                 payload.logger.info('🌱 Ensuring seed data...')
 
-                await cleanupExpiredMessages(payload)
+                try {
+                    await cleanupExpiredMessages(payload)
+                } catch (e: any) {
+                    if (e?.message?.includes('no such table')) {
+                        payload.logger.warn('⚠️  Tables not yet created (fresh DB). Skipping TTL cleanup.')
+                    } else {
+                        throw e
+                    }
+                }
 
-                const userIdsByEmail = await ensureUsers(payload)
+                let userIdsByEmail: Record<string, string>
+                try {
+                    userIdsByEmail = await ensureUsers(payload)
+                } catch (e: any) {
+                    if (e?.message?.includes('no such table')) {
+                        payload.logger.warn('⚠️  Tables not yet created (fresh DB). Run migrations or restart after schema push.')
+                        return
+                    }
+                    throw e
+                }
+
                 await seedAvatars(payload)
 
                 const demoAdminId = userIdsByEmail['demo-admin@cc.local']

@@ -84,12 +84,21 @@ This runs `scripts/deploy-rc.sh` which:
 1. Clones the repo to `~/www/rc-cc/` (first run only)
 2. Checks out the target branch and pulls latest
 3. Installs dependencies and builds
-4. Installs the launchd plist (first run only)
-5. Restarts the `com.gatocube.rc-cc` service
+4. Pushes database schema from source (fresh DBs only)
+5. Installs the launchd plist (first run only)
+6. Restarts the `com.gatocube.rc-cc` service
+7. Waits for the server to become healthy (HTTP 200)
+8. Runs smoke tests (`all-pages.spec.ts`) against `http://127.0.0.1:3232` -- fails the deploy if tests fail
 
 After deploying, the RC is available at **https://rccc.gatocube.com** (local: `http://127.0.0.1:3232`).
 
 RC uses its own SQLite database at `~/www/rc-cc/data/cc.db`, fully isolated from production.
+
+To run the smoke tests independently (without redeploying):
+
+```bash
+pnpm test:rc
+```
 
 ## Release checklist
 
