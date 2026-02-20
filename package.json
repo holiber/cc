@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "pnpm -F @command-center/dashboard dev",
     "dev:reset-db": "node scripts/reset-dev-db.mjs",
-    "build": "pnpm -F @command-center/dashboard build",
+    "build": "pnpm build:packages && pnpm -F @command-center/dashboard build",
     "build:packages": "pnpm -C packages/api build && pnpm -C packages/client build",
     "lint": "pnpm -F @command-center/dashboard lint",
     "storybook": "pnpm -F @command-center/dashboard storybook",
