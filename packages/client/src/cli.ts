@@ -1,13 +1,10 @@
 #!/usr/bin/env tsx
 /**
- * CommandCenter CLI — auto-generated from the API's Zod schemas and apiMeta.
+ * CommandCenter CLI — fully auto-generated from apiRoutes.
  *
- * NO command descriptions or argument definitions live here.
- * - Help text  → imported from apiMeta  (@command-center/api)
- * - Arg types  → derived from Zod schemas (@command-center/api)
- * - API calls  → delegated to Eden Treaty via reporter
- *
- * Adding a new API endpoint only requires editing app.ts + schemas.ts.
+ * Adding a new API endpoint only requires editing app.ts + schemas.ts + index.ts.
+ * CLI commands, options, and help text are all derived from the route registry.
+ * The only manual command is `connect` (WebSocket REPL).
  */
 
 import yargs from 'yargs';
@@ -15,14 +12,10 @@ import { hideBin } from 'yargs/helpers';
 import type { Options } from 'yargs';
 import { z } from 'zod';
 import WebSocket from 'ws';
-import os from 'os';
 
-import {
-    apiMeta,
-    KnockRequestSchema,
-    DescriptorSchema,
-} from '@command-center/api';
-import { createClient } from './client';
+import { apiRoutes } from '@command-center/api';
+import type { RouteDefinition } from '@command-center/api';
+import { callApi, routeToParamShape } from './callApi';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -30,46 +23,32 @@ const DEFAULT_URL = process.env.CC_API_URL || 'http://localhost:3222/api/v1';
 
 // ─── Helpers ────────────────────────────────────────────────
 
-/**
- * Walk a ZodObject shape and emit yargs Options for each field.
- * Skips fields listed in `omit` (e.g. auto-filled ones like descriptor).
- */
-function schemaToOpts(
-    schema: z.ZodObject<any>,
-    omit: string[] = [],
-): Record<string, Options> {
+function zodShapeToYargsOpts(shape: Record<string, z.ZodTypeAny>): Record<string, Options> {
     const opts: Record<string, Options> = {};
-    for (const [key, raw] of Object.entries(schema.shape)) {
-        if (omit.includes(key)) continue;
-        // Unwrap optional
-        const field = raw instanceof z.ZodOptional ? raw.unwrap() : raw;
-        const optional = raw instanceof z.ZodOptional;
+    for (const [key, raw] of Object.entries(shape)) {
+        let field: z.ZodTypeAny = raw;
+        let optional = false;
+
+        if (field instanceof z.ZodOptional) {
+            field = field.unwrap();
+            optional = true;
+        }
 
         let type: 'string' | 'number' | 'boolean' = 'string';
         if (field instanceof z.ZodNumber) type = 'number';
         if (field instanceof z.ZodBoolean) type = 'boolean';
 
-        // ZodEnum → list choices
         const choices =
             field instanceof z.ZodEnum ? (field as z.ZodEnum<any>).options : undefined;
 
         opts[key] = {
             type,
             demandOption: !optional,
-            description: (field as any).description,
+            description: field.description,
             ...(choices ? { choices } : {}),
         };
     }
     return opts;
-}
-
-function autoDescriptor(): z.infer<typeof DescriptorSchema> {
-    return {
-        machine: os.hostname(),
-        ip: '127.0.0.1',
-        runtime: `node-${process.versions.node}`,
-        via: 'cli',
-    };
 }
 
 function output(data: unknown) {
@@ -85,232 +64,141 @@ async function run(fn: () => Promise<unknown>) {
     }
 }
 
-// ─── Zod schemas for CLI commands ──────────────────────────
-// We omit 'descriptor' from knock — it's auto-filled from the local env.
-const knockOpts = schemaToOpts(KnockRequestSchema, ['descriptor']);
+// ─── Auto-register API commands ─────────────────────────────
+
+function registerRoutes(cli: any): any {
+    // Group routes by prefix for subcommand nesting (e.g., "admin.knocks" -> admin > knocks)
+    const topLevel: string[] = [];
+    const grouped = new Map<string, string[]>();
+
+    for (const name of Object.keys(apiRoutes)) {
+        if (name === 'connect') continue;
+        const dot = name.indexOf('.');
+        if (dot === -1) {
+            topLevel.push(name);
+        } else {
+            const prefix = name.slice(0, dot);
+            if (!grouped.has(prefix)) grouped.set(prefix, []);
+            grouped.get(prefix)!.push(name);
+        }
+    }
+
+    // Register top-level commands
+    for (const name of topLevel) {
+        const route = (apiRoutes as Record<string, RouteDefinition>)[name];
+        const shape = routeToParamShape(route);
+        const opts = zodShapeToYargsOpts(shape);
+
+        cli = cli.command(
+            name,
+            route.summary,
+            (y) => y.options(opts).epilog(route.description),
+            (argv) => {
+                run(() => callApi(argv.url as string, route, argv as Record<string, unknown>));
+            },
+        );
+    }
+
+    // Register grouped subcommands (e.g., admin knocks, admin approve)
+    for (const [prefix, names] of grouped) {
+        cli = cli.command(prefix, `${prefix.charAt(0).toUpperCase() + prefix.slice(1)} commands`, (y) => {
+            let sub = y;
+            for (const fullName of names) {
+                const subName = fullName.slice(prefix.length + 1);
+                const route = (apiRoutes as Record<string, RouteDefinition>)[fullName];
+                const shape = routeToParamShape(route);
+                const opts = zodShapeToYargsOpts(shape);
+
+                sub = sub.command(
+                    subName,
+                    route.summary,
+                    (yy) => yy.options(opts).epilog(route.description),
+                    (argv) => {
+                        run(() => callApi(argv.url as string, route, argv as Record<string, unknown>));
+                    },
+                );
+            }
+            return sub.demandCommand(1).strict();
+        });
+    }
+
+    return cli;
+}
 
 // ─── CLI ────────────────────────────────────────────────────
 
-yargs(hideBin(process.argv))
+let cli = yargs(hideBin(process.argv))
     .scriptName('reporter')
     .option('url', {
         type: 'string',
         default: DEFAULT_URL,
         description: 'CommandCenter API base URL',
-    })
+    });
 
-    // ── health ───────────────────────────────────────────
-    .command(
-        'health',
-        apiMeta.health.summary,
-        { describe: { hidden: true, type: 'string', default: apiMeta.health.description } },
-        (argv) => {
-            const r = createClient(argv.url as string);
-            run(async () => {
-                const { data, error, status } = await r.health.get();
-                if (error) throw new Error(`Health check failed: ${status}`);
-                return data;
-            });
-        },
-    )
+cli = registerRoutes(cli);
 
-    // ── knock ────────────────────────────────────────────
-    .command(
-        'knock',
-        apiMeta.knock.summary,
-        (y) => y
-            .options(knockOpts)
-            .option('ip', {
-                type: 'string',
-                description: 'Set x-forwarded-for (helps avoid rate-limit collisions in tests)',
-            })
-            .epilog(apiMeta.knock.description),
-        (argv) => {
-            const r = createClient(argv.url as string);
-            run(async () => {
-                const { data, error, status } = await r.knock.post({
-                    name: argv.name as string,
-                    role: argv.role as any,
-                    intent: argv.intent as string,
-                    secret: argv.secret as string,
-                    descriptor: autoDescriptor(),
-                }, argv.ip ? { headers: { 'x-forwarded-for': String(argv.ip) } } : undefined);
-                if (error) throw new Error((error as any)?.value?.error ?? `Knock failed: ${status}`);
-                return data;
-            });
-        },
-    )
+// ── connect (manual — WebSocket REPL, not a REST call) ──────
+cli = cli.command(
+    'connect',
+    apiRoutes.connect.summary,
+    (y) => y.epilog(apiRoutes.connect.description),
+    (argv) => {
+        const baseUrl = argv.url as string;
+        const wsUrl = baseUrl
+            .replace(/^http:/, 'ws:')
+            .replace(/^https:/, 'wss:')
+            .replace(/\/api\/v1\/?$/, '/connect');
 
-    // ── claim ────────────────────────────────────────────
-    .command(
-        'claim',
-        apiMeta.claim.summary,
-        (y) =>
-            y
-                .option('request-id', { type: 'string', demandOption: true, description: 'Knock request ID' })
-                .option('secret', { type: 'string', demandOption: true, description: 'Secret used during knock' })
-                .epilog(apiMeta.claim.description),
-        (argv) => {
-            const r = createClient(argv.url as string);
-            run(async () => {
-                const { data, error, status } = await (r.knock as any)(
-                    { id: argv['request-id'] as string },
-                ).claim.post({ secret: argv.secret as string });
-                if (error) throw new Error((error as any)?.value?.error ?? `Claim failed: ${status}`);
-                return data;
-            });
-        },
-    )
+        console.log(`Connecting to ${wsUrl} …`);
+        const ws = new WebSocket(wsUrl);
 
-    // ── admin ────────────────────────────────────────────
-    .command('admin', 'Admin commands', (y) =>
-        y
-            // admin knocks
-            .command(
-                'knocks',
-                apiMeta['admin.knocks'].summary,
-                (yy) =>
-                    yy
-                        .option('token', { type: 'string', demandOption: true, description: 'Admin Bearer token' })
-                        .option('status', { type: 'string', description: 'Filter by status (pending|approved|claimed|expired|rejected)' })
-                        .epilog(apiMeta['admin.knocks'].description),
-                (argv) => {
-                    const r = createClient(argv.url as string);
-                    run(async () => {
-                        const { data, error, status } = await r.admin.knocks.get({
-                            query: { status: argv.status as string | undefined },
-                            headers: { Authorization: `Bearer ${argv.token}` },
-                        });
-                        if (error) throw new Error((error as any)?.value?.error ?? `List failed: ${status}`);
-                        return data;
-                    });
-                },
-            )
+        ws.on('open', () => {
+            console.log('Connected. Type commands (e.g. health, knock --name … ). Ctrl+C to quit.\n');
+            process.stdin.setEncoding('utf8');
+            process.stdin.resume();
+            process.stdin.on('data', (chunk: string) => {
+                const line = chunk.trim();
+                if (!line) return;
 
-            // admin approve
-            .command(
-                'approve',
-                apiMeta['admin.approve'].summary,
-                (yy) =>
-                    yy
-                        .option('token', { type: 'string', demandOption: true, description: 'Admin Bearer token' })
-                        .option('id', { type: 'string', demandOption: true, description: 'Knock request ID to approve' })
-                        .epilog(apiMeta['admin.approve'].description),
-                (argv) => {
-                    const r = createClient(argv.url as string);
-                    run(async () => {
-                        const { data, error, status } = await (r.admin.knocks as any)(
-                            { id: argv.id as string },
-                        ).approve.post({}, { headers: { Authorization: `Bearer ${argv.token}` } });
-                        if (error) throw new Error((error as any)?.value?.error ?? `Approve failed: ${status}`);
-                        return data;
-                    });
-                },
-            )
-
-            // admin reject
-            .command(
-                'reject',
-                apiMeta['admin.reject'].summary,
-                (yy) =>
-                    yy
-                        .option('token', { type: 'string', demandOption: true, description: 'Admin Bearer token' })
-                        .option('id', { type: 'string', demandOption: true, description: 'Knock request ID to reject' })
-                        .epilog(apiMeta['admin.reject'].description),
-                (argv) => {
-                    const r = createClient(argv.url as string);
-                    run(async () => {
-                        const { data, error, status } = await (r.admin.knocks as any)(
-                            { id: argv.id as string },
-                        ).reject.post({}, { headers: { Authorization: `Bearer ${argv.token}` } });
-                        if (error) throw new Error((error as any)?.value?.error ?? `Reject failed: ${status}`);
-                        return data;
-                    });
-                },
-            )
-
-            .demandCommand(1)
-            .strict(),
-    )
-
-    // ── connect ──────────────────────────────────────────
-    /**
-     * Opens a persistent WebSocket to /connect and starts an interactive REPL.
-     *
-     * Send commands as: method [--key value ...]
-     * Examples:
-     *   health
-     *   knock --name alex --role agent --intent "review code" --secret s3cr3t
-     *   admin.approve --token tok_xxx --id knock_yyy
-     *   admin.reject --token tok_xxx --id knock_yyy
-     *
-     * Ctrl+C to disconnect.
-     */
-    .command(
-        'connect',
-        apiMeta.connect.summary,
-        (y) => y.epilog(apiMeta.connect.description),
-        (argv) => {
-            const baseUrl = argv.url as string;
-            const wsUrl = baseUrl
-                .replace(/^http:/, 'ws:')
-                .replace(/^https:/, 'wss:')
-                .replace(/\/api\/v1\/?$/, '/connect');
-
-            console.log(`Connecting to ${wsUrl} …`);
-            const ws = new WebSocket(wsUrl);
-
-            ws.on('open', () => {
-                console.log('Connected. Type commands (e.g. health, knock --name … ). Ctrl+C to quit.\n');
-                process.stdin.setEncoding('utf8');
-                process.stdin.resume();
-                process.stdin.on('data', (chunk: string) => {
-                    const line = chunk.trim();
-                    if (!line) return;
-
-                    // Parse "method --key value --key2 value2" into JSON message
-                    const parts = line.split(/\s+/);
-                    const method = parts[0];
-                    const args: Record<string, unknown> = {};
-                    for (let i = 1; i < parts.length - 1; i++) {
-                        if (parts[i].startsWith('--')) {
-                            const key = parts[i].slice(2);
-                            const val = parts[i + 1];
-                            args[key] = val;
-                            i++; // skip value
-                        }
+                const parts = line.split(/\s+/);
+                const method = parts[0];
+                const args: Record<string, unknown> = {};
+                for (let i = 1; i < parts.length - 1; i++) {
+                    if (parts[i].startsWith('--')) {
+                        const key = parts[i].slice(2);
+                        const val = parts[i + 1];
+                        args[key] = val;
+                        i++;
                     }
-
-                    ws.send(JSON.stringify({ method, args }));
-                });
-            });
-
-            ws.on('message', (raw: Buffer | string) => {
-                try {
-                    const msg = JSON.parse(raw.toString());
-                    console.log(JSON.stringify(msg, null, 2));
-                } catch {
-                    console.log(raw.toString());
                 }
-            });
 
-            ws.on('error', (err) => {
-                console.error('WS error:', err.message);
-                process.exit(1);
+                ws.send(JSON.stringify({ method, args }));
             });
+        });
 
-            ws.on('close', () => {
-                console.log('\nDisconnected.');
-                process.exit(0);
-            });
+        ws.on('message', (raw: Buffer | string) => {
+            try {
+                const msg = JSON.parse(raw.toString());
+                console.log(JSON.stringify(msg, null, 2));
+            } catch {
+                console.log(raw.toString());
+            }
+        });
 
-            process.on('SIGINT', () => {
-                ws.close();
-            });
-        },
-    )
+        ws.on('error', (err) => {
+            console.error('WS error:', err.message);
+            process.exit(1);
+        });
 
-    .demandCommand(1)
-    .strict()
-    .help()
-    .parse();
+        ws.on('close', () => {
+            console.log('\nDisconnected.');
+            process.exit(0);
+        });
+
+        process.on('SIGINT', () => {
+            ws.close();
+        });
+    },
+);
+
+cli.demandCommand(1).strict().help().parse();

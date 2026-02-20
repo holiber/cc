@@ -4,10 +4,11 @@ import {
     ClaimRequestSchema, TokenResponseSchema,
     KnockListSchema, ApproveResponseSchema, RejectResponseSchema,
     HealthSchema, ErrorSchema,
+    SendMessageSchema, SendMessageResponseSchema,
 } from './schemas';
 import {
     checkRateLimit, createKnock, claimKnock,
-    listKnocks, approveKnock, rejectKnock, validateAdminToken,
+    listKnocks, approveKnock, rejectKnock, validateAdminToken, validateToken,
 } from './store';
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -148,6 +149,39 @@ const app = new Elysia()
             summary: 'Reject a knock request',
             description: 'Reject a pending knock request so it cannot be claimed.',
             tags: ['Admin'],
+            security: [{ Bearer: [] }],
+        },
+    })
+
+    // ── Send message (authenticated agents) ──────────────────
+    .post('/message', ({ body, request, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
+
+        // Accept both agent tokens and admin tokens
+        const agentInfo = validateToken(token);
+        if (agentInfo) {
+            return { ok: true as const, fromName: agentInfo.name, fromRole: agentInfo.role };
+        }
+
+        if (validateAdminToken(token)) {
+            return { ok: true as const, fromName: 'admin', fromRole: 'admin' };
+        }
+
+        set.status = 401;
+        return { error: 'Invalid or expired token', code: 'UNAUTHORIZED' };
+    }, {
+        body: SendMessageSchema,
+        detail: {
+            summary: 'Send a message',
+            description:
+                'Send a message to a user or role. ' +
+                'The "to" field supports: "admin" (all admins), "orc" (all orchestrators), ' +
+                'or "@username" (specific user). Requires a Bearer token from the knock/claim flow.',
+            tags: ['Authenticated'],
             security: [{ Bearer: [] }],
         },
     });

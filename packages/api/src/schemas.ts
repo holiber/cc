@@ -75,6 +75,21 @@ export const HealthSchema = z.object({
     uptime: z.number(),
 });
 
+// ─── Send Message ───────────────────────────────────────────
+
+export const SendMessageSchema = z.object({
+    subject: z.string().min(1).max(256),
+    body: z.string().max(10_000).optional(),
+    to: z.string().min(1).max(64),
+    contentType: z.string().max(16).optional(),
+});
+
+export const SendMessageResponseSchema = z.object({
+    ok: z.literal(true),
+    fromName: z.string(),
+    fromRole: z.string(),
+});
+
 // ─── Error ──────────────────────────────────────────────────
 
 export const ErrorSchema = z.object({
@@ -94,3 +109,5 @@ export type ApproveResponse = z.infer<typeof ApproveResponseSchema>;
 export type RejectResponse = z.infer<typeof RejectResponseSchema>;
 export type Health = z.infer<typeof HealthSchema>;
 export type Descriptor = z.infer<typeof DescriptorSchema>;
+export type SendMessage = z.infer<typeof SendMessageSchema>;
+export type SendMessageResponse = z.infer<typeof SendMessageResponseSchema>;

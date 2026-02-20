@@ -304,6 +304,22 @@ async function createAdminBroadcastMessageForKnock({ requestId, knockBody }) {
     }
 }
 
+async function createPayloadMessage({ subject, body: text, to, contentType, fromName, fromRole }) {
+    try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/internal/send-message`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'x-cc-internal': process.env.CC_INTERNAL_TOKEN,
+            },
+            body: JSON.stringify({ subject, text, to, contentType, fromName, fromRole }),
+        });
+        if (!res.ok) await res.text().catch(() => null);
+    } catch {
+        // ignore
+    }
+}
+
 async function handleApiRequest(req, res) {
     const proto = req.headers['x-forwarded-proto'] || 'http';
     const host = req.headers.host || `${hostname}:${port}`;
@@ -326,10 +342,10 @@ async function handleApiRequest(req, res) {
 
     const fetchRes = await apiApp.fetch(forwarded);
 
-    // Deterministic side-effect: when a knock is submitted over HTTP, create the admin-visible message
-    // before the client proceeds, to keep E2E stable.
     try {
         const original = new URL(originalUrl);
+
+        // Side-effect: when a knock is submitted, create the admin-visible message.
         if (req.method === 'POST' && original.pathname === '/api/v1/knock' && fetchRes.ok) {
             const clone = fetchRes.clone();
             const knockResponse = safeJsonParse(await clone.text());
@@ -337,6 +353,23 @@ async function handleApiRequest(req, res) {
             if (typeof requestId === 'string' && requestId.length > 0) {
                 const knockBody = safeJsonParse(bodyText) ?? {};
                 await createAdminBroadcastMessageForKnock({ requestId, knockBody });
+            }
+        }
+
+        // Side-effect: when a message is sent via API, create the Payload message.
+        if (req.method === 'POST' && original.pathname === '/api/v1/message' && fetchRes.ok) {
+            const clone = fetchRes.clone();
+            const apiResult = safeJsonParse(await clone.text());
+            if (apiResult?.ok) {
+                const msgBody = safeJsonParse(bodyText) ?? {};
+                await createPayloadMessage({
+                    subject: msgBody.subject,
+                    body: msgBody.body,
+                    to: msgBody.to,
+                    contentType: msgBody.contentType,
+                    fromName: apiResult.fromName,
+                    fromRole: apiResult.fromRole,
+                });
             }
         }
     } catch {
@@ -472,6 +505,31 @@ app.prepare().then(() => {
                         const knock = apiStore.rejectKnock(id);
                         if (!knock) throw new Error('Knock not found or not pending.');
                         result = { id: knock.id, status: 'rejected', message: 'Knock rejected.' };
+                        break;
+                    }
+
+                    case 'message': {
+                        const token = String(args.token || '');
+                        const agentInfo = apiStore.validateToken(token);
+                        const isAdmin = !agentInfo && apiStore.validateAdminToken(token);
+                        if (!agentInfo && !isAdmin) throw new Error('Unauthorized');
+
+                        const fromName = agentInfo ? agentInfo.name : 'admin';
+                        const fromRole = agentInfo ? agentInfo.role : 'admin';
+
+                        if (!args.subject) throw new Error('subject is required');
+                        if (!args.to) throw new Error('to is required');
+
+                        await createPayloadMessage({
+                            subject: String(args.subject),
+                            body: args.body != null ? String(args.body) : undefined,
+                            to: String(args.to),
+                            contentType: args.contentType != null ? String(args.contentType) : 'md',
+                            fromName,
+                            fromRole,
+                        });
+
+                        result = { ok: true, fromName, fromRole };
                         break;
                     }
 

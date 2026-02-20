@@ -160,7 +160,11 @@ pnpm pw:trace
 pnpm dev:reset-db
 ```
 
-## Deployment notes (common pitfalls)
+## Deployment notes
+
+See [docs/deploy.md](deploy.md) for the full branch strategy, release checklist, and launchd setup.
+
+Common pitfalls:
 
 - **Production should not run `next dev`**. Use `next build` + `next start` with `NODE_ENV=production`.
 - If the admin page renders blank with `ChunkLoadError` and browser logs `ERR_QUIC_PROTOCOL_ERROR`,
