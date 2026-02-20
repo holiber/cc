@@ -173,6 +173,17 @@ export const Messages: CollectionConfig = {
             index: true,
         },
         {
+            name: 'readBy',
+            type: 'json',
+            defaultValue: [],
+            admin: { description: 'Array of caller keys who have read this message (userId or "api:agentName")' },
+        },
+        {
+            name: 'replyTo',
+            type: 'relationship',
+            relationTo: 'messages',
+        },
+        {
             name: 'externalRef',
             type: 'text',
             unique: true,

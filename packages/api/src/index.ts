@@ -19,6 +19,7 @@ export {
     ApproveResponseSchema, RejectResponseSchema, HealthSchema,
     ErrorSchema, DescriptorSchema,
     SendMessageSchema, SendMessageResponseSchema,
+    MarkReadResponseSchema,
 } from './schemas';
 export type {
     KnockRequest, KnockResponse,
@@ -27,6 +28,7 @@ export type {
     ApproveResponse, RejectResponse, Health,
     Descriptor,
     SendMessage, SendMessageResponse,
+    MarkReadResponse,
 } from './schemas';
 
 import {
@@ -132,6 +134,30 @@ export const apiRoutes = {
             'or "@username" (specific user). Requires a Bearer token.',
         auth: 'token' as const,
         bodySchema: SendMessageSchema,
+    },
+    messages: {
+        method: 'GET' as const,
+        path: '/messages',
+        summary: 'List messages',
+        description:
+            'List messages visible to the authenticated user. ' +
+            'Admins see all admin-broadcast messages, agents see messages they sent. ' +
+            'Pass unread=true to see only unread messages. Response includes unreadCount.',
+        auth: 'token' as const,
+        querySchema: z.object({
+            limit: z.coerce.number().optional().describe('Max messages to return (default 20)'),
+            unread: z.coerce.boolean().optional().describe('If true, return only unread messages'),
+        }),
+    },
+    mark_read: {
+        method: 'POST' as const,
+        path: '/messages/:id/read',
+        summary: 'Mark a message as read',
+        description: 'Mark a specific message as read for the authenticated user.',
+        auth: 'token' as const,
+        pathParams: z.object({
+            id: z.string().describe('Message ID to mark as read'),
+        }),
     },
     connect: {
         method: 'GET' as const,

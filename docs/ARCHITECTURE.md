@@ -141,14 +141,33 @@ For architecture details, protocol docs, and diagrams, see the [JabTerm ARCHITEC
 Protocol-level terminal tests (`ws` client) don’t create a browser `page`, so Playwright UI won’t show DOM
 screenshots. The UI-side checks are intentionally smoke-level.
 
+### Integration tests (`*.integration.ts`)
+
+Integration tests verify that external AI agents can use our MCP server to interact with CommandCenter.
+They are **not run automatically** because they make real API calls to OpenAI and cost money (~$0.02/run).
+
+- **File pattern**: `packages/client/tests/*.integration.ts`
+- **Config**: `packages/client/vitest.integration.config.ts` (separate from unit tests)
+- **Prereqs**: `OPENAI_API_KEY` env var + running dev server (`pnpm dev`)
+- **Run**: `OPENAI_API_KEY=sk-... pnpm test:integration`
+- **Skip behavior**: tests are gracefully skipped if `OPENAI_API_KEY` is not set
+
+Current tests in `ai-agent-mcp.integration.ts`:
+
+1. **Single agent** -- spawns one MCP client, connects a `gpt-4o-mini` agent, verifies it can check health, send a message, and list messages.
+2. **Two-agent communication** -- spawns two independent MCP clients (Agent Alpha and Agent Beta). Alpha sends a message, Beta lists messages and verifies Alpha's message is present. Proves agents can communicate through the system.
+
 ## Useful commands
 
 ```bash
-# full suite
+# full suite (unit + e2e, does NOT include integration)
 pnpm test
 
 # dashboard e2e only (dynamic ports)
 pnpm -F @command-center/dashboard test
+
+# integration tests (requires OPENAI_API_KEY + running dev server)
+OPENAI_API_KEY=sk-... pnpm test:integration
 
 # playwright UI (loads artifacts under .cache/playwright/)
 pnpm pw:ui

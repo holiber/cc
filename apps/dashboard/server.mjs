@@ -16,7 +16,7 @@ import { execSync } from 'child_process';
 import apiAppMod from '@command-center/api/app';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createTerminalProxy } from 'jabterm/server';
-import apiStoreMod from '@command-center/api/store';
+import * as apiStoreMod from '@command-center/api/store';
 import * as messageBus from './src/realtime/messageBus.ts';
 
 config({ path: '.env' });
@@ -304,7 +304,7 @@ async function createAdminBroadcastMessageForKnock({ requestId, knockBody }) {
     }
 }
 
-async function createPayloadMessage({ subject, body: text, to, contentType, fromName, fromRole }) {
+async function createPayloadMessage({ subject, body: text, to, contentType, fromName, fromRole, replyTo }) {
     try {
         const res = await fetch(`http://127.0.0.1:${port}/api/internal/send-message`, {
             method: 'POST',
@@ -312,7 +312,7 @@ async function createPayloadMessage({ subject, body: text, to, contentType, from
                 'content-type': 'application/json',
                 'x-cc-internal': process.env.CC_INTERNAL_TOKEN,
             },
-            body: JSON.stringify({ subject, text, to, contentType, fromName, fromRole }),
+            body: JSON.stringify({ subject, text, to, contentType, fromName, fromRole, replyTo }),
         });
         if (!res.ok) await res.text().catch(() => null);
     } catch {
@@ -320,10 +320,105 @@ async function createPayloadMessage({ subject, body: text, to, contentType, from
     }
 }
 
+function extractBearerToken(headers) {
+    const auth = headers.authorization || headers.Authorization || '';
+    const match = String(auth).match(/^Bearer\s+(.+)$/i);
+    return match ? match[1] : null;
+}
+
+function resolveCallerFromToken(token) {
+    const agentInfo = apiStore.validateToken(token);
+    const isAdmin = !agentInfo && apiStore.validateAdminToken(token);
+    if (!agentInfo && !isAdmin) return null;
+
+    const fromName = agentInfo ? agentInfo.name : 'admin';
+    const role = isAdmin ? 'admin' : (agentInfo?.role || 'agent');
+    const callerKey = agentInfo ? `api:${agentInfo.name}` : 'api:admin';
+    return { fromName, role, callerKey };
+}
+
+async function handleListMessages(req, res) {
+    const token = extractBearerToken(req.headers);
+    if (!token) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+    }
+
+    const caller = resolveCallerFromToken(token);
+    if (!caller) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Invalid or expired token' }));
+        return;
+    }
+
+    const reqUrl = new URL(req.url, `http://127.0.0.1:${port}`);
+    const limit = reqUrl.searchParams.get('limit') || '20';
+    const unread = reqUrl.searchParams.get('unread') || '';
+
+    const params = new URLSearchParams({
+        fromName: caller.fromName,
+        role: caller.role,
+        callerKey: caller.callerKey,
+        limit,
+    });
+    if (unread === 'true') params.set('unread', 'true');
+
+    const internalUrl = `http://127.0.0.1:${port}/api/internal/list-messages?${params}`;
+    const internalRes = await fetch(internalUrl, {
+        headers: { 'x-cc-internal': process.env.CC_INTERNAL_TOKEN },
+    });
+
+    res.statusCode = internalRes.status;
+    res.setHeader('content-type', 'application/json');
+    res.end(await internalRes.text());
+}
+
+async function handleMarkRead(req, res, messageId) {
+    const token = extractBearerToken(req.headers);
+    if (!token) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+    }
+
+    const caller = resolveCallerFromToken(token);
+    if (!caller) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Invalid or expired token' }));
+        return;
+    }
+
+    const internalRes = await fetch(`http://127.0.0.1:${port}/api/internal/mark-read`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            'x-cc-internal': process.env.CC_INTERNAL_TOKEN,
+        },
+        body: JSON.stringify({ messageId, callerKey: caller.callerKey }),
+    });
+
+    res.statusCode = internalRes.status;
+    res.setHeader('content-type', 'application/json');
+    res.end(await internalRes.text());
+}
+
 async function handleApiRequest(req, res) {
     const proto = req.headers['x-forwarded-proto'] || 'http';
     const host = req.headers.host || `${hostname}:${port}`;
     const originalUrl = `${proto}://${host}${req.url}`;
+    const original = new URL(originalUrl);
+
+    // GET /api/v1/messages is handled by the gateway (Payload-backed, not Elysia)
+    if (req.method === 'GET' && original.pathname === '/api/v1/messages') {
+        return handleListMessages(req, res);
+    }
+
+    // POST /api/v1/messages/:id/read
+    const markReadMatch = req.method === 'POST' && original.pathname.match(/^\/api\/v1\/messages\/([^/]+)\/read$/);
+    if (markReadMatch) {
+        return handleMarkRead(req, res, markReadMatch[1]);
+    }
 
     const u = new URL(originalUrl);
     if (u.pathname === '/api/v1') u.pathname = '/';
@@ -369,6 +464,7 @@ async function handleApiRequest(req, res) {
                     contentType: msgBody.contentType,
                     fromName: apiResult.fromName,
                     fromRole: apiResult.fromRole,
+                    replyTo: msgBody.replyTo,
                 });
             }
         }
@@ -527,6 +623,7 @@ app.prepare().then(() => {
                             contentType: args.contentType != null ? String(args.contentType) : 'md',
                             fromName,
                             fromRole,
+                            replyTo: args.replyTo != null ? String(args.replyTo) : undefined,
                         });
 
                         result = { ok: true, fromName, fromRole };

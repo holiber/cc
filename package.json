@@ -16,7 +16,8 @@
     "pw:ui": "node scripts/e2e.mjs -- --ui",
     "pw:trace": "node scripts/show-trace.mjs",
     "deploy:rc": "bash scripts/deploy-rc.sh",
-    "test:rc": "BASE_URL=http://127.0.0.1:3232 CC_REUSE_SERVERS=1 pnpm -C apps/dashboard exec playwright test tests/all-pages.spec.ts --reporter=list"
+    "test:rc": "BASE_URL=http://127.0.0.1:3232 CC_REUSE_SERVERS=1 pnpm -C apps/dashboard exec playwright test tests/all-pages.spec.ts --reporter=list",
+    "test:integration": "pnpm -C packages/client exec vitest run --config vitest.integration.config.ts"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.0",

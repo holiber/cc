@@ -82,12 +82,20 @@ export const SendMessageSchema = z.object({
     body: z.string().max(10_000).optional(),
     to: z.string().min(1).max(64),
     contentType: z.string().max(16).optional(),
+    replyTo: z.string().max(64).optional().describe('Message ID to reply to'),
 });
 
 export const SendMessageResponseSchema = z.object({
     ok: z.literal(true),
     fromName: z.string(),
     fromRole: z.string(),
+});
+
+// ─── Mark Read ──────────────────────────────────────────────
+
+export const MarkReadResponseSchema = z.object({
+    ok: z.literal(true),
+    id: z.string(),
 });
 
 // ─── Error ──────────────────────────────────────────────────
@@ -111,3 +119,4 @@ export type Health = z.infer<typeof HealthSchema>;
 export type Descriptor = z.infer<typeof DescriptorSchema>;
 export type SendMessage = z.infer<typeof SendMessageSchema>;
 export type SendMessageResponse = z.infer<typeof SendMessageResponseSchema>;
+export type MarkReadResponse = z.infer<typeof MarkReadResponseSchema>;

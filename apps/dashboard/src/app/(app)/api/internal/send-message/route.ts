@@ -25,7 +25,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Bad request' }, { status: 400 })
     }
 
-    const { subject, text, to, contentType, fromName, fromRole: senderRole } = body
+    const { subject, text, to, contentType, fromName, fromRole: senderRole, replyTo } = body
     if (typeof subject !== 'string' || !subject) {
         return NextResponse.json({ error: 'subject is required' }, { status: 400 })
     }
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     const mappedFromRole = ROLE_TO_FROM_ROLE[senderRole] ?? 'agent'
 
     try {
-        await payload.create({
+        const created = await payload.create({
             collection: 'messages',
             overrideAccess: true,
             data: {
@@ -81,9 +81,10 @@ export async function POST(request: Request) {
                 fromRole: mappedFromRole as any,
                 broadcastToAdmins,
                 ...(toUserIds.length > 0 ? { toUsers: toUserIds } : {}),
+                ...(replyTo ? { replyTo: Number(replyTo) || replyTo } : {}),
             },
         })
-        return NextResponse.json({ ok: true })
+        return NextResponse.json({ ok: true, messageId: created.id })
     } catch (e: any) {
         return NextResponse.json(
             { ok: false, error: e?.message || 'Failed to create message' },

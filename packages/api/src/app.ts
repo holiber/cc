@@ -150,6 +150,34 @@ const app = new Elysia()
         },
     })
 
+    // ── Mark message as read ──────────────────────────────────
+    .post('/messages/:id/read', ({ request, params, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
+
+        const agentInfo = validateToken(token);
+        if (agentInfo) {
+            return { ok: true as const, id: params.id, callerKey: `api:${agentInfo.name}` };
+        }
+
+        if (validateAdminToken(token)) {
+            return { ok: true as const, id: params.id, callerKey: 'api:admin' };
+        }
+
+        set.status = 401;
+        return { error: 'Invalid or expired token', code: 'UNAUTHORIZED' };
+    }, {
+        detail: {
+            summary: 'Mark a message as read',
+            description: 'Mark a specific message as read for the authenticated user.',
+            tags: ['Authenticated'],
+            security: [{ Bearer: [] }],
+        },
+    })
+
     // ── Send message (authenticated agents) ──────────────────
     .post('/message', ({ body, request, set }) => {
         const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
