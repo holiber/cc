@@ -31,8 +31,11 @@ assertNoLongSleeps({ root: ROOT });
 const createdDataDir = !process.env.CC_DATA_DIR;
 const dataDir = process.env.CC_DATA_DIR
     ? path.resolve(process.env.CC_DATA_DIR)
-    : path.join(ROOT, '.cache', `cc-test-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    : path.join(ROOT, '.cache', 'tests', 'test__all');
 
+if (createdDataDir) {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+}
 fs.mkdirSync(dataDir, { recursive: true });
 process.env.CC_DATA_DIR = dataDir;
 
@@ -99,7 +102,7 @@ let exitCode = 0;
 
 // Vitest — in-process, fast, no server required
 const vitestExit = run(
-    'Unit & Integration Tests (Vitest)',
+    'Unit Tests (Vitest)',
     'pnpm -F @command-center/client test',
 );
 if (vitestExit !== 0) exitCode = vitestExit;

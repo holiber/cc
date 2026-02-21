@@ -21,6 +21,7 @@ docs/                    Architecture and deploy documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** — runtime architecture, message pipeline, terminal subsystem, testing strategy, and the relationship between the Elysia API and the dashboard gateway.
 - **[Deploy & Release](docs/deploy.md)** — branch strategy (`staging -> rc -> main`), infrastructure (Cloudflare Tunnel + launchd), database management, build/run commands, RC deploy process, and release checklist.
+- **[Testing Strategy](docs/testing-strategy.md)** — unified testing contract: test types (unit/e2e/scenario/integration), smoke rules, execution modes, artifact conventions, and agent test priorities.
 
 ## Development
 

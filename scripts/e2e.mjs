@@ -90,8 +90,8 @@ ensureEnv('NEXT_DIST_DIR', `../../.cache/next-e2e`);
 const createdDataDir = !process.env.CC_DATA_DIR;
 let dataDirForCleanup = null;
 if (!process.env.CC_DATA_DIR) {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dataDir = path.join(ROOT, '.cache', `cc-test-${stamp}`);
+  const dataDir = path.join(ROOT, '.cache', 'tests', 'test-e2e__chromium');
+  fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
   process.env.CC_DATA_DIR = dataDir;
   dataDirForCleanup = dataDir;
