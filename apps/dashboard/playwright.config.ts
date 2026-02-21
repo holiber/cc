@@ -53,7 +53,16 @@ export default defineConfig({
         },
         // All tests — depend on setup, reuse auth state
         {
-            name: 'chromium',
+            name: 'e2e',
+            use: {
+                ...devices['Desktop Chrome'],
+                storageState: AUTH_FILE,
+            },
+            dependencies: ['setup'],
+        },
+        // We will make scenario an alias of e2e for now in cc
+        {
+            name: 'scenario',
             use: {
                 ...devices['Desktop Chrome'],
                 storageState: AUTH_FILE,
