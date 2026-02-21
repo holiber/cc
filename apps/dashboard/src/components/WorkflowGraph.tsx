@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
     ReactFlow,
     Background,
@@ -205,25 +205,22 @@ export default function WorkflowGraph({
     isLooping = false,
     activeStepId,
 }: WorkflowGraphProps) {
-    const getLayout = () => {
+    const { nodes: layoutNodes, edges: layoutEdges } = useMemo(() => {
         if (layout === "loop") {
             return createLoopLayout(steps, isLooping);
         } else if (layout === "parallel" && parallelGroups) {
             return createParallelLayout(steps, parallelGroups, activeStepId);
         }
         return createLinearLayout(steps, activeStepId);
-    };
+    }, [steps, layout, parallelGroups, isLooping, activeStepId]);
 
-    const { nodes: initialNodes, edges: initialEdges } = getLayout();
-
-    const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+    const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
+    const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
     useEffect(() => {
-        const { nodes: newNodes, edges: newEdges } = getLayout();
-        setNodes(newNodes);
-        setEdges(newEdges);
-    }, [steps, layout, parallelGroups, isLooping]);
+        setNodes(layoutNodes);
+        setEdges(layoutEdges);
+    }, [layoutNodes, layoutEdges]);
 
     return (
         <div className="w-full h-[500px] bg-gray-900/80 rounded-lg border border-gray-700/50" data-testid="workflow-graph">

@@ -127,7 +127,7 @@ function registerRoutes(cli: any): any {
 // ─── CLI ────────────────────────────────────────────────────
 
 let cli = yargs(hideBin(process.argv))
-    .scriptName('reporter')
+    .scriptName('cc-cli')
     .option('url', {
         type: 'string',
         default: DEFAULT_URL,
@@ -162,7 +162,7 @@ cli = cli.command(
                 const parts = line.split(/\s+/);
                 const method = parts[0];
                 const args: Record<string, unknown> = {};
-                for (let i = 1; i < parts.length - 1; i++) {
+                for (let i = 1; i < parts.length; i++) {
                     if (parts[i].startsWith('--')) {
                         const key = parts[i].slice(2);
                         const val = parts[i + 1];

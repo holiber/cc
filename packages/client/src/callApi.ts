@@ -68,11 +68,21 @@ export async function callApi(
         headers['x-forwarded-for'] = String(args.ip);
     }
 
-    const res = await fetch(url.toString(), {
-        method: route.method,
-        headers,
-        body,
-    });
+    const controller = new AbortController();
+    const timeoutMs = parseInt(process.env.CC_FETCH_TIMEOUT_MS || '30000', 10);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    let res: Response;
+    try {
+        res = await fetch(url.toString(), {
+            method: route.method,
+            headers,
+            body,
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timer);
+    }
 
     const text = await res.text();
     let data: unknown;

@@ -57,6 +57,9 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm -C apps/dashboard exec playwright install chromium
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Run tests
         env:
           CI: "1"
