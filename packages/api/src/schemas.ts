@@ -46,7 +46,7 @@ export const KnockEntrySchema = z.object({
     role: z.string(),
     intent: z.string(),
     descriptor: DescriptorSchema,
-    status: z.enum(['pending', 'approved', 'claimed', 'expired']),
+    status: z.enum(['pending', 'approved', 'claimed', 'expired', 'rejected']),
     createdAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
 });
@@ -61,12 +61,41 @@ export const ApproveResponseSchema = z.object({
     message: z.string(),
 });
 
+export const RejectResponseSchema = z.object({
+    id: z.string(),
+    status: z.literal('rejected'),
+    message: z.string(),
+});
+
 // ─── Health ─────────────────────────────────────────────────
 
 export const HealthSchema = z.object({
     status: z.literal('ok'),
     version: z.string(),
     uptime: z.number(),
+});
+
+// ─── Send Message ───────────────────────────────────────────
+
+export const SendMessageSchema = z.object({
+    subject: z.string().min(1).max(256),
+    body: z.string().max(10_000).optional(),
+    to: z.string().min(1).max(64),
+    contentType: z.string().max(16).optional(),
+    replyTo: z.string().max(64).optional().describe('Message ID to reply to'),
+});
+
+export const SendMessageResponseSchema = z.object({
+    ok: z.literal(true),
+    fromName: z.string(),
+    fromRole: z.string(),
+});
+
+// ─── Mark Read ──────────────────────────────────────────────
+
+export const MarkReadResponseSchema = z.object({
+    ok: z.literal(true),
+    id: z.string(),
 });
 
 // ─── Error ──────────────────────────────────────────────────
@@ -85,5 +114,9 @@ export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 export type KnockEntry = z.infer<typeof KnockEntrySchema>;
 export type KnockList = z.infer<typeof KnockListSchema>;
 export type ApproveResponse = z.infer<typeof ApproveResponseSchema>;
+export type RejectResponse = z.infer<typeof RejectResponseSchema>;
 export type Health = z.infer<typeof HealthSchema>;
 export type Descriptor = z.infer<typeof DescriptorSchema>;
+export type SendMessage = z.infer<typeof SendMessageSchema>;
+export type SendMessageResponse = z.infer<typeof SendMessageResponseSchema>;
+export type MarkReadResponse = z.infer<typeof MarkReadResponseSchema>;

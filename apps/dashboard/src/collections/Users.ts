@@ -6,7 +6,28 @@ export const Users: CollectionConfig = {
     admin: {
         useAsTitle: 'email',
     },
+    hooks: {
+        beforeValidate: [
+            ({ data }) => {
+                if (!data) return data
+                if (!data.username && typeof data.email === 'string' && data.email.includes('@')) {
+                    data.username = data.email.split('@')[0]
+                }
+                if (typeof data.username === 'string') {
+                    data.username = data.username.trim().toLowerCase()
+                }
+                return data
+            },
+        ],
+    },
     fields: [
+        {
+            name: 'username',
+            type: 'text',
+            required: false,
+            unique: true,
+            index: true,
+        },
         {
             name: 'role',
             type: 'select',
@@ -16,6 +37,7 @@ export const Users: CollectionConfig = {
                 { label: 'Admin', value: 'admin' },
                 { label: 'Orchestrator', value: 'orchestrator' },
                 { label: 'Worker', value: 'worker' },
+                { label: 'Coder', value: 'coder' },
             ],
         },
         {

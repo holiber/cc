@@ -10,6 +10,14 @@ pnpm dev
 
 By default the dashboard runs on `http://localhost:3222`.
 
+The dev-mode database (Payload SQLite) is stored in `.cache/data/dashboard/cc.db` by default.
+
+To wipe dev data and start fresh:
+
+```bash
+pnpm dev:reset-db
+```
+
 ### Tests
 
 Runs vitest + Playwright E2E:
@@ -34,6 +42,7 @@ pnpm pw:trace
 ## Docs
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Deploy & Release](docs/deploy.md)
 
 ## Learn More
 
@@ -44,8 +53,6 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Deploy
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [docs/deploy.md](docs/deploy.md) for the full branch strategy, release checklist, and launchd setup.

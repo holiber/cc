@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -11,8 +11,9 @@ import type { IconType } from "react-icons";
 import BurgerMenu from "@/components/BurgerMenu";
 import Footer from "@/components/Footer";
 import TerminalManager from "@/components/terminal/TerminalManager";
-import { getUnreadCount } from "@/data/mockMessages";
 import { NAV_ITEMS } from "@/components/navConfig";
+import { subscribeMessagesFeed } from "@/realtime/messagesFeed";
+import { getUnreadState, subscribeUnreadChanges } from "@/realtime/unreadState";
 
 const SIDEBAR_WIDTH = 224; // w-56 = 14rem = 224px
 const DEFAULT_OPENCODE_WIDTH = 440;
@@ -39,6 +40,13 @@ function getPageMeta(pathname: string): PageMeta {
     return FALLBACK_META;
 }
 
+type NotificationToast = {
+    id: string;
+    subject: string;
+    fromName: string;
+    createdAt: string;
+};
+
 export default function TopBar({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const [menuOpen, setMenuOpen] = useState(false);
@@ -46,11 +54,127 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
     const [isTerminalOpen, setIsTerminalOpen] = useState(() => pathname === '/messages');
     const [opencodeWidth, setOpencodeWidth] = useState(DEFAULT_OPENCODE_WIDTH);
     const [terminalHeight, setTerminalHeight] = useState(DEFAULT_TERMINAL_HEIGHT);
-    const unread = getUnreadCount();
     const pageMeta = getPageMeta(pathname);
     const PageIcon = pageMeta.icon;
 
     const toggleTerminal = useCallback(() => setIsTerminalOpen(v => !v), []);
+
+    const mailRef = useRef<HTMLDivElement | null>(null);
+    const [mailAnchor, setMailAnchor] = useState<{ top: number; right: number } | null>(null);
+
+    const [notificationToasts, setNotificationToasts] = useState<NotificationToast[]>([]);
+    const seenNotificationsRef = useRef<Set<string>>(new Set());
+    const toastTimersRef = useRef<Map<string, number>>(new Map());
+
+    const [feed, setFeed] = useState<{ ready: boolean; userId: string | null; docs: any[] }>({ ready: false, userId: null, docs: [] });
+    const [unreadTick, setUnreadTick] = useState(0);
+
+    const unread = useMemo(() => {
+        const userId = feed.userId;
+        if (!userId) return 0;
+        const { lastReadAtMs, forcedUnreadIds } = getUnreadState(userId);
+        const last = lastReadAtMs || 0;
+        let n = 0;
+        for (const d of feed.docs) {
+            const id = d?.id ? String(d.id) : "";
+            const createdAtMs = typeof d?.createdAt === "string" ? new Date(d.createdAt).getTime() : 0;
+            if ((createdAtMs > last) || (id && forcedUnreadIds.has(id))) n++;
+        }
+        return n;
+    }, [feed.docs, feed.userId, unreadTick]);
+
+    const toastStyle = useMemo(() => ({
+        position: "fixed" as const,
+        top: mailAnchor?.top ?? 56,
+        right: mailAnchor?.right ?? 12,
+        zIndex: 120,
+    }), [mailAnchor]);
+
+    useEffect(() => {
+        function updateAnchor() {
+            const el = mailRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            setMailAnchor({
+                top: Math.round(rect.bottom + 8),
+                right: Math.round(window.innerWidth - rect.right),
+            });
+        }
+        updateAnchor();
+        window.addEventListener("resize", updateAnchor);
+        window.addEventListener("scroll", updateAnchor, true);
+        return () => {
+            window.removeEventListener("resize", updateAnchor);
+            window.removeEventListener("scroll", updateAnchor, true);
+        };
+    }, []);
+
+    const dismissToast = useCallback((id: string) => {
+        setNotificationToasts((prev) => prev.filter((t) => t.id !== id));
+        const timer = toastTimersRef.current.get(id);
+        if (timer) {
+            window.clearTimeout(timer);
+            toastTimersRef.current.delete(id);
+        }
+    }, []);
+
+    useEffect(() => {
+        const unsubFeed = subscribeMessagesFeed((s) => {
+            setFeed({ ready: s.ready, userId: s.userId, docs: s.docs });
+        });
+        const unsubUnread = subscribeUnreadChanges(() => setUnreadTick((v) => v + 1));
+        return () => {
+            unsubFeed();
+            unsubUnread();
+            for (const t of toastTimersRef.current.values()) window.clearTimeout(t);
+            toastTimersRef.current.clear();
+        };
+    }, [dismissToast]);
+
+    // Toasts: show a few most recent unread messages (primed by initial fetch + WS).
+    useEffect(() => {
+        const userId = feed.userId;
+        if (!userId) return;
+        const { lastReadAtMs, forcedUnreadIds } = getUnreadState(userId);
+        const last = lastReadAtMs || 0;
+        const unreadDocs = feed.docs
+            .map((d) => {
+                const id = d?.id ? String(d.id) : "";
+                const createdAt = String(d?.createdAt ?? "");
+                const createdAtMs = createdAt ? new Date(createdAt).getTime() : 0;
+                const isUnread = (createdAtMs > last) || (id && forcedUnreadIds.has(id));
+                if (!isUnread || !id) return null;
+                return {
+                    id,
+                    subject: String(d?.subject ?? "Message"),
+                    fromName: String(d?.fromName ?? "Unknown"),
+                    createdAt,
+                } satisfies NotificationToast;
+            })
+            .filter(Boolean) as NotificationToast[];
+
+        for (const t of unreadDocs.slice(0, 3)) {
+            if (seenNotificationsRef.current.has(t.id)) continue;
+            seenNotificationsRef.current.add(t.id);
+            setNotificationToasts((prev) => [t, ...prev].slice(0, 3));
+            const timer = window.setTimeout(() => dismissToast(t.id), 20_000);
+            toastTimersRef.current.set(t.id, timer);
+        }
+    }, [dismissToast, feed.docs, feed.userId, unreadTick]);
+
+    // If another part of the app approves/rejects a knock, update badge/toasts immediately
+    // without relying on polling (useful in E2E where polling is disabled).
+    useEffect(() => {
+        function onKnockAction(e: Event) {
+            const detail = (e as CustomEvent<any>)?.detail;
+            const knockId = typeof detail?.knockId === "string" ? detail.knockId : "";
+            if (!knockId) return;
+            // No special pending-knock state; keep for backward compatibility (dismiss any toast by id if present).
+            dismissToast(knockId);
+        }
+        window.addEventListener("cc:knock-action", onKnockAction as any);
+        return () => window.removeEventListener("cc:knock-action", onKnockAction as any);
+    }, [dismissToast]);
 
     // — OpenCode resize —
     const startOpencodeResize = useCallback((e: React.MouseEvent) => {
@@ -123,22 +247,27 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                         </div>
 
                         <div className="flex items-center gap-2">
-                            <Link
-                                href="/messages"
-                                className={`relative w-8 h-8 rounded-lg border flex items-center justify-center transition-colors backdrop-blur-sm
-                                    ${pathname === "/messages"
-                                        ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
-                                        : "bg-gray-800/80 border-white/10 text-gray-400 hover:text-white hover:bg-gray-700/80"
-                                    }`}
-                                aria-label="Messages"
-                            >
-                                <FiMail className="w-4 h-4" />
-                                {unread > 0 && (
-                                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-red-500/40 animate-pulse">
-                                        {unread > 9 ? "9+" : unread}
-                                    </span>
-                                )}
-                            </Link>
+                            <div ref={mailRef}>
+                                <Link
+                                    href="/messages"
+                                    className={`relative w-8 h-8 rounded-lg border flex items-center justify-center transition-colors backdrop-blur-sm
+                                        ${pathname === "/messages"
+                                            ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
+                                            : "bg-gray-800/80 border-white/10 text-gray-400 hover:text-white hover:bg-gray-700/80"
+                                        }`}
+                                    aria-label="Messages"
+                                >
+                                    <FiMail className="w-4 h-4" />
+                                    {unread > 0 && (
+                                        <span
+                                            data-testid="messages-badge"
+                                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center shadow-lg shadow-red-500/40 animate-pulse"
+                                        >
+                                            {unread > 9 ? "9+" : unread}
+                                        </span>
+                                    )}
+                                </Link>
+                            </div>
 
                             <button
                                 onClick={() => setOpencodeOpen(v => !v)}
@@ -230,6 +359,52 @@ export default function TopBar({ children }: { children: React.ReactNode }) {
                     )}
                 </AnimatePresence>
             </motion.div>
+
+            {/* Toast notifications */}
+            <AnimatePresence>
+                {notificationToasts.length > 0 && (
+                    <motion.div
+                        data-testid="notification-toast-container"
+                        style={toastStyle as any}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        className="w-[340px] max-w-[90vw] space-y-2"
+                    >
+                        {notificationToasts.map((t) => (
+                            <motion.div
+                                key={t.id}
+                                data-testid="notification-toast"
+                                data-message-id={t.id}
+                                initial={{ opacity: 0, y: -6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -6 }}
+                                className="rounded-xl border border-white/10 bg-gray-900/95 backdrop-blur-md shadow-xl shadow-black/40 p-3"
+                            >
+                                <div className="flex items-start gap-2">
+                                    <Link
+                                        href="/messages"
+                                        onClick={() => dismissToast(t.id)}
+                                        className="flex-1 min-w-0 cursor-pointer"
+                                        title="Open messages"
+                                    >
+                                        <div className="text-[11px] font-bold text-white truncate">{t.subject}</div>
+                                        <div className="text-[10px] text-gray-400 truncate">from {t.fromName}</div>
+                                        <div className="text-[10px] text-gray-500 mt-1">Open to view details</div>
+                                    </Link>
+                                    <button
+                                        onClick={() => dismissToast(t.id)}
+                                        className="text-gray-500 hover:text-white p-1 rounded hover:bg-white/10 cursor-pointer"
+                                        aria-label="Dismiss notification"
+                                    >
+                                        <FiX className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            </motion.div>
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

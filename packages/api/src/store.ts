@@ -10,6 +10,31 @@ const knocks = new Map<string, KnockEntry & { secretHash: string }>();
 const tokens = new Map<string, { token: string; role: string; name: string; expiresAt: Date }>();
 const rateLimits = new Map<string, number>(); // ip → last knock timestamp
 
+// ─── Hooks (optional, side effects) ─────────────────────────
+
+export type KnockHooks = {
+    onKnockCreated?: (knock: KnockEntry) => void | Promise<void>;
+    onKnockApproved?: (knock: KnockEntry) => void | Promise<void>;
+};
+
+let knockHooks: KnockHooks = {};
+
+export function setKnockHooks(next: KnockHooks) {
+    knockHooks = next ?? {};
+}
+
+function runHook(fn: ((k: KnockEntry) => void | Promise<void>) | undefined, arg: KnockEntry) {
+    if (!fn) return;
+    try {
+        const res = fn(arg);
+        if (res && typeof (res as any).then === 'function') {
+            (res as Promise<void>).catch(() => { /* ignore */ });
+        }
+    } catch {
+        // ignore
+    }
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function generateId(prefix: string): string {
@@ -66,7 +91,9 @@ export function createKnock(data: {
     };
 
     knocks.set(id, entry);
-    return toPublic(entry);
+    const pub = toPublic(entry);
+    runHook(knockHooks.onKnockCreated, pub);
+    return pub;
 }
 
 export function listKnocks(statusFilter?: string): KnockEntry[] {
@@ -91,6 +118,17 @@ export function approveKnock(id: string): KnockEntry | null {
     if (!knock) return null;
     if (knock.status !== 'pending') return null;
     knock.status = 'approved';
+    const pub = toPublic(knock);
+    runHook(knockHooks.onKnockApproved, pub);
+    return pub;
+}
+
+export function rejectKnock(id: string): KnockEntry | null {
+    pruneExpired();
+    const knock = knocks.get(id);
+    if (!knock) return null;
+    if (knock.status !== 'pending') return null;
+    knock.status = 'rejected';
     return toPublic(knock);
 }
 

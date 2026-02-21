@@ -8,6 +8,8 @@ const PW_CACHE = path.join(CACHE_ROOT, 'playwright');
 const AUTH_FILE = path.join(PW_CACHE, 'auth', 'user.json');
 const baseURL = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || '3222'}`;
 const isCI = !!process.env.CI;
+const forcedWorkersRaw = process.env.PW_WORKERS;
+const forcedWorkers = forcedWorkersRaw ? Number.parseInt(forcedWorkersRaw, 10) : NaN;
 const isLocal = (() => {
     try {
         const host = new URL(baseURL).hostname;
@@ -23,11 +25,12 @@ const reuseExistingServer = process.env.CC_REUSE_SERVERS === '1' && !process.env
 export default defineConfig({
     testDir: './tests',
     outputDir: path.join(PW_CACHE, 'test-results'),
-    fullyParallel: isCI ? false : true,
+    // Keep E2E deterministic: no parallel workers, no cross-test state collisions.
+    fullyParallel: false,
     forbidOnly: isCI,
     retries: isCI ? 2 : 0,
-    // In CI, avoid parallel workers to reduce flakiness and any chance of port/process conflicts.
-    workers: isCI ? 1 : (isLocal ? undefined : 1),
+    // Avoid concurrent tests with open ports/PTY processes.
+    workers: Number.isFinite(forcedWorkers) ? forcedWorkers : 1,
     reporter: [['html', { outputFolder: path.join(PW_CACHE, 'report'), open: 'never' }]],
 
     /**
@@ -39,7 +42,8 @@ export default defineConfig({
     use: {
         baseURL,
         trace: 'on-first-retry',
-        video: 'on',
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure',
     },
     projects: [
         // Auth setup — runs first, stores cookies
@@ -83,15 +87,12 @@ export default defineConfig({
                  * Terminal WebSocket server — required by terminal-echo and terminal-zombie tests.
                  * Runs on NEXT_PUBLIC_TERMINAL_WS_PORT (default :3223).
                  */
-                command: `node ${path.join(ROOT, 'scripts/terminal-server.mjs')}`,
+                command: `npx jabterm-server --port ${terminalPort} --strict-port`,
                 port: terminalPort,
                 reuseExistingServer,
                 timeout: 15_000,
                 stdout: 'pipe',
                 stderr: 'pipe',
-                env: {
-                    ...(process.env.NEXT_PUBLIC_TERMINAL_WS_PORT ? { NEXT_PUBLIC_TERMINAL_WS_PORT: process.env.NEXT_PUBLIC_TERMINAL_WS_PORT } : {}),
-                },
             },
         ],
     } : {}),

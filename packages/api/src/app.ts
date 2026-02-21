@@ -1,13 +1,13 @@
 import { Elysia } from 'elysia';
 import {
-    KnockRequestSchema, KnockResponseSchema,
-    ClaimRequestSchema, TokenResponseSchema,
-    KnockListSchema, ApproveResponseSchema,
-    HealthSchema, ErrorSchema,
+    KnockRequestSchema,
+    ClaimRequestSchema,
+    HealthSchema,
+    SendMessageSchema,
 } from './schemas';
 import {
     checkRateLimit, createKnock, claimKnock,
-    listKnocks, approveKnock, validateAdminToken,
+    listKnocks, approveKnock, rejectKnock, validateAdminToken, validateToken,
 } from './store';
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -123,86 +123,91 @@ const app = new Elysia()
         },
     })
 
-    // ── WebSocket — persistent session ──────────────────────
-    /**
-     * Connect opens a persistent WebSocket session.
-     *
-     * Inbound messages: JSON lines  { method: string, args?: unknown }
-     * Outbound messages: JSON lines { id?, ok: boolean, data?, error? }
-     *
-     * Supported methods: health, knock, claim, admin.knocks, admin.approve
-     */
-    .ws('/connect', {
-        async message(ws, raw) {
-            let parsed: { method: string; args?: Record<string, unknown> };
+    .post('/admin/knocks/:id/reject', ({ request, params, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token || !validateAdminToken(token)) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
 
-            try {
-                parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as any);
-            } catch {
-                ws.send(JSON.stringify({ ok: false, error: 'Invalid JSON' }));
-                return;
-            }
+        const knock = rejectKnock(params.id);
+        if (!knock) {
+            set.status = 404;
+            return { error: 'Knock not found or not pending.', code: 'NOT_FOUND' };
+        }
 
-            const { method, args = {} } = parsed;
-
-            try {
-                let result: unknown;
-
-                switch (method) {
-                    case 'health':
-                        result = {
-                            status: 'ok',
-                            version: '0.1.0',
-                            uptime: Math.floor((Date.now() - startTime) / 1000),
-                        };
-                        break;
-
-                    case 'knock': {
-                        const knock = createKnock(args as any);
-                        result = {
-                            requestId: knock.id,
-                            expiresAt: knock.expiresAt,
-                            message: 'Knock received. Awaiting admin approval.',
-                        };
-                        break;
-                    }
-
-                    case 'claim': {
-                        const { requestId, secret } = args as { requestId: string; secret: string };
-                        const token = claimKnock(requestId, secret);
-                        if (!token) throw new Error('Knock not found, not approved, or invalid secret.');
-                        result = token;
-                        break;
-                    }
-
-                    case 'admin.knocks': {
-                        const { token: adminToken, status: statusFilter } = args as { token: string; status?: string };
-                        if (!validateAdminToken(adminToken)) throw new Error('Unauthorized');
-                        result = { knocks: listKnocks(statusFilter) };
-                        break;
-                    }
-
-                    case 'admin.approve': {
-                        const { token: adminToken, id } = args as { token: string; id: string };
-                        if (!validateAdminToken(adminToken)) throw new Error('Unauthorized');
-                        const knock = approveKnock(id);
-                        if (!knock) throw new Error('Knock not found or not pending.');
-                        result = { id: knock.id, status: 'approved', message: 'Knock approved.' };
-                        break;
-                    }
-
-                    default:
-                        throw new Error(`Unknown method: ${method}`);
-                }
-
-                ws.send(JSON.stringify({ ok: true, data: result }));
-            } catch (err: any) {
-                ws.send(JSON.stringify({ ok: false, error: err.message ?? String(err) }));
-            }
+        return {
+            id: knock.id,
+            status: 'rejected' as const,
+            message: 'Knock rejected.',
+        };
+    }, {
+        detail: {
+            summary: 'Reject a knock request',
+            description: 'Reject a pending knock request so it cannot be claimed.',
+            tags: ['Admin'],
+            security: [{ Bearer: [] }],
         },
+    })
 
-        open(ws) {
-            ws.send(JSON.stringify({ ok: true, event: 'connected', data: { hint: 'Send {method, args} JSON lines.' } }));
+    // ── Mark message as read ──────────────────────────────────
+    .post('/messages/:id/read', ({ request, params, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
+
+        const agentInfo = validateToken(token);
+        if (agentInfo) {
+            return { ok: true as const, id: params.id, callerKey: `api:${agentInfo.name}` };
+        }
+
+        if (validateAdminToken(token)) {
+            return { ok: true as const, id: params.id, callerKey: 'api:admin' };
+        }
+
+        set.status = 401;
+        return { error: 'Invalid or expired token', code: 'UNAUTHORIZED' };
+    }, {
+        detail: {
+            summary: 'Mark a message as read',
+            description: 'Mark a specific message as read for the authenticated user.',
+            tags: ['Authenticated'],
+            security: [{ Bearer: [] }],
+        },
+    })
+
+    // ── Send message (authenticated agents) ──────────────────
+    .post('/message', ({ body, request, set }) => {
+        const token = extractBearerToken(request.headers.get('authorization') ?? undefined);
+        if (!token) {
+            set.status = 401;
+            return { error: 'Unauthorized', code: 'UNAUTHORIZED' };
+        }
+
+        // Accept both agent tokens and admin tokens
+        const agentInfo = validateToken(token);
+        if (agentInfo) {
+            return { ok: true as const, fromName: agentInfo.name, fromRole: agentInfo.role };
+        }
+
+        if (validateAdminToken(token)) {
+            return { ok: true as const, fromName: 'admin', fromRole: 'admin' };
+        }
+
+        set.status = 401;
+        return { error: 'Invalid or expired token', code: 'UNAUTHORIZED' };
+    }, {
+        body: SendMessageSchema,
+        detail: {
+            summary: 'Send a message',
+            description:
+                'Send a message to a user or role. ' +
+                'The "to" field supports: "admin" (all admins), "orc" (all orchestrators), ' +
+                'or "@username" (specific user). Requires a Bearer token from the knock/claim flow.',
+            tags: ['Authenticated'],
+            security: [{ Bearer: [] }],
         },
     });
 

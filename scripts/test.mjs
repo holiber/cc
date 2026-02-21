@@ -10,10 +10,8 @@
  *   1. Creates a fresh isolated data dir in .cache/cc-test-<timestamp>/
  *      (or reuses CC_DATA_DIR if already set)
  *   2. Runs Vitest (packages/client) — in-process, no server needed
- *   3. Starts the terminal WS server (scripts/terminal-server.mjs) on :3223
- *   4. Runs Playwright (apps/dashboard) — starts a fresh Next.js server via webServer
- *   5. Stops the terminal server
- *   6. Exits with combined status (non-zero if either suite fails)
+ *   3. Runs Playwright (apps/dashboard) — starts Next.js + jabterm-server via webServer config
+ *   4. Exits with combined status (non-zero if either suite fails)
  */
 
 import { execSync } from 'child_process';
@@ -21,11 +19,16 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';
+import { assertNoLongSleeps } from './assert-no-long-sleeps.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+// Guardrail: don't allow explicit long sleeps in tests.
+assertNoLongSleeps({ root: ROOT });
+
 // ── 1. Prepare data dir ─────────────────────────────────────
 
+const createdDataDir = !process.env.CC_DATA_DIR;
 const dataDir = process.env.CC_DATA_DIR
     ? path.resolve(process.env.CC_DATA_DIR)
     : path.join(ROOT, '.cache', `cc-test-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -84,6 +87,12 @@ if (!process.env.NEXT_PUBLIC_TERMINAL_WS_PORT || !process.env.TERMINAL_WS_URL) {
     process.env.TERMINAL_WS_URL = `ws://127.0.0.1:${terminalPort}`;
 }
 
+// Keep Next.js output stable during tests to prevent apps/dashboard/tsconfig.json churn.
+if (!process.env.NEXT_DIST_DIR || process.env.NEXT_DIST_DIR === '') {
+    // Relative to apps/dashboard working dir (same convention as scripts/e2e.mjs)
+    process.env.NEXT_DIST_DIR = '../../.cache/next-e2e';
+}
+
 // ── 4. Run suites ────────────────────────────────────────────
 
 let exitCode = 0;
@@ -110,5 +119,17 @@ console.log(vitestExit === 0 ? '  ✅ Vitest:     passed' : '  ❌ Vitest:     F
 console.log(playwrightExit === 0 ? '  ✅ Playwright: passed' : '  ❌ Playwright: FAILED');
 console.log(`\n  Data dir: ${dataDir}`);
 console.log('──────────────────────────────────────────────\n');
+
+// ── 6. Cleanup (keep workspace small) ─────────────────────────
+const keepArtifacts = process.env.CC_KEEP_ARTIFACTS === '1' || process.env.CC_KEEP_CACHE === '1';
+if (!keepArtifacts && exitCode === 0) {
+    // Remove the per-run data dir if we created it.
+    if (createdDataDir) {
+        try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    // Remove bulky caches that are safe to regenerate.
+    try { fs.rmSync(path.join(ROOT, '.cache', 'next-e2e'), { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(path.join(ROOT, '.cache', 'playwright'), { recursive: true, force: true }); } catch { /* ignore */ }
+}
 
 process.exit(exitCode);

@@ -93,12 +93,6 @@ test.describe('Smoke check', () => {
         await assertNoOverlay(page, 'CommandCenter (via menu)');
         collector.assertClean('CommandCenter (via menu)');
 
-        // → Experiments
-        await navigateViaMenu(page, 'Experiments');
-        await page.waitForURL('**/experiments/**', { timeout: 10_000 });
-        await assertNoOverlay(page, 'Experiments');
-        collector.assertClean('Experiments');
-
         // → Agent v1 (Orchestration)
         await navigateViaMenu(page, 'Agent v1');
         await page.waitForURL('**/orchestration', { timeout: 10_000 });
