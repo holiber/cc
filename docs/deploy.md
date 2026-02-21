@@ -29,11 +29,6 @@ The apps are kept alive by launchd agents:
 | Production | `com.gatocube.cc`     | `scripts/launchd-cc.sh`     | `~/Library/Logs/com.gatocube.cc` |
 | RC         | `com.gatocube.rc-cc`  | `scripts/launchd-rc-cc.sh`  | `~/Library/Logs/com.gatocube.rc-cc` |
 
-### Why not Vercel?
-
-`server.mjs` is a custom Node.js server with persistent WebSocket endpoints (`/ws/messages`, `/ws/terminal`, `/connect`) and `node-pty` for the terminal. Vercel's serverless model does not support these.
-
-When WebSocket features are extracted to a standalone server, the Next.js frontend can move to Vercel for automatic deployments and edge CDN.
 
 ## Database
 
