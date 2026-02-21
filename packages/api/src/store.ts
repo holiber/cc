@@ -164,7 +164,13 @@ export function validateToken(token: string): { role: string; name: string } | n
 
 // ─── Admin token (simple static check for now) ──────────────
 
-const ADMIN_TOKEN = process.env.CC_ADMIN_TOKEN || 'admin-dev-token';
+const ADMIN_TOKEN = (() => {
+    const t = process.env.CC_ADMIN_TOKEN;
+    if (!t && process.env.NODE_ENV === 'production') {
+        throw new Error('CC_ADMIN_TOKEN must be set in production');
+    }
+    return t || 'admin-dev-token';
+})();
 
 export function validateAdminToken(token: string): boolean {
     return token === ADMIN_TOKEN;

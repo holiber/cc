@@ -63,8 +63,8 @@ const app = new Elysia()
         },
     })
 
-    .post('/knock/:id/claim', ({ params, body, set }) => {
-        const result = claimKnock(params.id, body.secret);
+    .post('/knock/:requestId/claim', ({ params, body, set }) => {
+        const result = claimKnock(params.requestId, body.secret);
         if (!result) {
             set.status = 404;
             return { error: 'Knock not found, not approved, or invalid secret.', code: 'CLAIM_FAILED' };

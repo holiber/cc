@@ -41,8 +41,8 @@ echo "  $API_TGZ"
 echo "  $CLIENT_TGZ"
 
 echo "[release] Creating git tag $TAG..."
-git tag -f "$TAG"
-git push cc "$TAG" --force 2>/dev/null || git push origin "$TAG" --force 2>/dev/null || true
+git tag "$TAG" || { echo "[release] ERROR: tag $TAG already exists. Use a new version or delete the tag first."; exit 1; }
+git push cc "$TAG" 2>/dev/null || git push origin "$TAG" || { echo "[release] ERROR: failed to push tag $TAG"; exit 1; }
 
 echo "[release] Creating GitHub release $TAG..."
 gh release create "$TAG" \

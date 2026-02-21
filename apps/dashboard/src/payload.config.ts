@@ -36,7 +36,13 @@ export default buildConfig({
         },
     },
     collections: [Users, Media, Projects, Messages],
-    secret: process.env.PAYLOAD_SECRET || 'command-center-dev-secret-change-me',
+    secret: (() => {
+        const s = process.env.PAYLOAD_SECRET
+        if (!s && process.env.NODE_ENV === 'production') {
+            throw new Error('PAYLOAD_SECRET must be set in production')
+        }
+        return s || 'command-center-dev-secret-change-me'
+    })(),
     db: sqliteAdapter({
         client: {
             url: `file:${path.join(dataDir, 'cc.db')}`,

@@ -6,7 +6,7 @@
 #
 set -euo pipefail
 
-REPO_URL="git@github.com:holiber/cc.git"
+REPO_URL="${DEPLOY_REPO_URL:-$(git remote get-url origin 2>/dev/null || echo 'git@github.com:holiber/cc.git')}"
 RC_DIR="$HOME/www/rc-cc"
 BRANCH="${1:-rc}"
 LABEL="com.gatocube.rc-cc"
@@ -50,7 +50,7 @@ main() {
   fi
 
   echo "[deploy-rc] Pulling latest changes"
-  git pull --ff-only origin "$BRANCH" || git pull origin "$BRANCH"
+  git pull --ff-only origin "$BRANCH"
 
   echo "[deploy-rc] Installing dependencies"
   pnpm install --frozen-lockfile 2>/dev/null || pnpm install
@@ -101,8 +101,8 @@ main() {
   done
 
   if [ "$healthy" != "true" ]; then
-    echo "[deploy-rc] WARNING: server did not become healthy within 60s, skipping smoke tests"
-    return 0
+    echo "[deploy-rc] ERROR: server did not become healthy within 60s"
+    exit 1
   fi
 
   # Resolve the workspace root (where this script lives, one level up from scripts/).

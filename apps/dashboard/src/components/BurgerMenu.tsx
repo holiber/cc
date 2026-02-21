@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     FiMenu,
@@ -33,10 +33,10 @@ export default function BurgerMenu({ isOpen: controlledIsOpen, onClose, onNaviga
     const menuRef = useRef<HTMLDivElement>(null);
     const storybookUrl = useStorybookUrl();
 
-    const close = () => {
+    const close = useCallback(() => {
         if (isControlled) { onClose?.(); }
         else { setInternalIsOpen(false); }
-    };
+    }, [isControlled, onClose]);
 
     // Close on click outside
     useEffect(() => {
@@ -49,7 +49,7 @@ export default function BurgerMenu({ isOpen: controlledIsOpen, onClose, onNaviga
             document.addEventListener("mousedown", handleClickOutside);
         }
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [isOpen, isControlled]);
+    }, [isOpen, close]);
 
     // Close on Escape
     useEffect(() => {
@@ -60,7 +60,7 @@ export default function BurgerMenu({ isOpen: controlledIsOpen, onClose, onNaviga
             document.addEventListener("keydown", handleKey);
         }
         return () => document.removeEventListener("keydown", handleKey);
-    }, [isOpen, isControlled]);
+    }, [isOpen, close]);
 
     return (
         <AnimatePresence>

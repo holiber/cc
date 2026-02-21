@@ -51,7 +51,9 @@ for (const [name, route] of Object.entries(apiRoutes) as [string, RouteDefinitio
                 const data = await callApi(CC_API_URL, route, args);
                 return textResult(data);
             } catch (e: any) {
-                return errorResult(e.message ?? String(e));
+                const msg = e.message ?? String(e);
+                const status = e.status ? ` (HTTP ${e.status})` : '';
+                return errorResult(`${msg}${status}`);
             }
         },
     );
