@@ -38,6 +38,7 @@ if (createdDataDir) {
 }
 fs.mkdirSync(dataDir, { recursive: true });
 process.env.CC_DATA_DIR = dataDir;
+process.env.TEST_ARTIFACTS_DIR = dataDir;
 
 console.log(`\n╔══════════════════════════════════════════════╗`);
 console.log(`║  CommandCenter Test Suite                    ║`);

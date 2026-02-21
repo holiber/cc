@@ -6,6 +6,19 @@ const CACHE_ROOT = path.join(ROOT, '.cache');
 const PW_CACHE = path.join(CACHE_ROOT, 'playwright');
 
 const AUTH_FILE = path.join(PW_CACHE, 'auth', 'user.json');
+
+const artifactsDir = process.env.TEST_ARTIFACTS_DIR;
+const outputDir = artifactsDir
+    ? path.join(artifactsDir, 'test-results')
+    : path.join(PW_CACHE, 'test-results');
+const reportDir = artifactsDir
+    ? path.join(artifactsDir, 'report')
+    : path.join(PW_CACHE, 'report');
+
+const isSmoke = process.env.CC_SMOKE === '1';
+const smokePerTest = parseInt(process.env.SMOKE_PER_TEST_TIMEOUT_MS || '30000', 10);
+const smokeTotal = parseInt(process.env.SMOKE_TOTAL_TIMEOUT_MS || '180000', 10);
+
 const baseURL = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || '3222'}`;
 const isCI = !!process.env.CI;
 const forcedWorkersRaw = process.env.PW_WORKERS;
@@ -24,14 +37,15 @@ const reuseExistingServer = process.env.CC_REUSE_SERVERS === '1' && !process.env
 
 export default defineConfig({
     testDir: './tests',
-    outputDir: path.join(PW_CACHE, 'test-results'),
-    // Keep E2E deterministic: no parallel workers, no cross-test state collisions.
+    outputDir,
     fullyParallel: false,
     forbidOnly: isCI,
     retries: isCI ? 2 : 0,
-    // Avoid concurrent tests with open ports/PTY processes.
     workers: Number.isFinite(forcedWorkers) ? forcedWorkers : 1,
-    reporter: [['html', { outputFolder: path.join(PW_CACHE, 'report'), open: 'never' }]],
+    reporter: isSmoke
+        ? [['json', { outputFile: process.env.PW_JSON_OUTPUT_FILE || path.join(reportDir, 'results.json') }]]
+        : [['html', { outputFolder: reportDir, open: 'never' }]],
+    ...(isSmoke ? { timeout: smokePerTest, globalTimeout: smokeTotal } : {}),
 
     /**
      * globalSetup creates a fresh CC_DATA_DIR (.cache/cc-test-<ts>/) before

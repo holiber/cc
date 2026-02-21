@@ -97,6 +97,8 @@ if (!process.env.CC_DATA_DIR) {
   dataDirForCleanup = dataDir;
 }
 
+ensureEnv('TEST_ARTIFACTS_DIR', process.env.CC_DATA_DIR);
+
 // Force a fresh server by default for determinism; allow opt-out.
 ensureEnv('CC_FRESH_SERVER', '1');
 
