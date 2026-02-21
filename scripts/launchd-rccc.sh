@@ -7,7 +7,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
 
-PROJECT_DIR="$HOME/www/rc-cc"
+PROJECT_DIR="$HOME/www/rccc"
 export NODE_ENV=production
 export CC_DATA_DIR="$PROJECT_DIR/data"
 export PORT=3232

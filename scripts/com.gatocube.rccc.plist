@@ -3,19 +3,19 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.gatocube.rc-cc</string>
+    <string>com.gatocube.rccc</string>
     <key>ProgramArguments</key>
     <array>
       <string>/bin/bash</string>
-      <string>/Users/alexonn/www/rc-cc/scripts/launchd-rc-cc.sh</string>
+      <string>/Users/alexonn/www/rccc/scripts/launchd-rccc.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/alexonn/Library/Logs/com.gatocube.rc-cc.log</string>
+    <string>/Users/alexonn/Library/Logs/com.gatocube.rccc.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/alexonn/Library/Logs/com.gatocube.rc-cc.err.log</string>
+    <string>/Users/alexonn/Library/Logs/com.gatocube.rccc.err.log</string>
   </dict>
 </plist>

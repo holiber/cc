@@ -7,9 +7,9 @@
 set -euo pipefail
 
 REPO_URL="git@github.com:holiber/cc.git"
-RC_DIR="$HOME/www/rc-cc"
+RC_DIR="$HOME/www/rccc"
 BRANCH="${1:-rc}"
-LABEL="com.gatocube.rc-cc"
+LABEL="com.gatocube.rccc"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
@@ -23,7 +23,7 @@ load_nvm() {
 }
 
 ensure_launchd() {
-  local src="$RC_DIR/scripts/com.gatocube.rc-cc.plist"
+  local src="$RC_DIR/scripts/com.gatocube.rccc.plist"
   if [ ! -f "$PLIST" ]; then
     echo "[deploy-rc] Installing launchd plist → $PLIST"
     cp "$src" "$PLIST"

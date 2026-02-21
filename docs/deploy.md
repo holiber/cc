@@ -9,7 +9,7 @@ staging ──► rc ──► main
 | Branch    | Purpose                        | Database               | Served at                   |
 |-----------|--------------------------------|------------------------|-----------------------------|
 | `staging` | Development. PRs target here.  | Own SQLite (`.cache/`) | `localhost:3222` (dev mode) |
-| `rc`      | Release candidate under test.  | Own SQLite (`~/www/rc-cc/data/`) | `rccc.gatocube.com` (port 3232) |
+| `rc`      | Release candidate under test.  | Own SQLite (`~/www/rccc/data/`) | `rccc.gatocube.com` (port 3232) |
 | `main`    | Stable production release.     | Production SQLite      | `cc.gatocube.com` via Cloudflare Tunnel |
 
 ## Infrastructure
@@ -27,7 +27,7 @@ The apps are kept alive by launchd agents:
 | Instance   | Plist label           | Script                      | Logs prefix                  |
 |------------|-----------------------|-----------------------------|------------------------------|
 | Production | `com.gatocube.cc`     | `scripts/launchd-cc.sh`     | `~/Library/Logs/com.gatocube.cc` |
-| RC         | `com.gatocube.rc-cc`  | `scripts/launchd-rc-cc.sh`  | `~/Library/Logs/com.gatocube.rc-cc` |
+| RC         | `com.gatocube.rccc`  | `scripts/launchd-rccc.sh`  | `~/Library/Logs/com.gatocube.rccc` |
 
 
 ## Database
@@ -38,7 +38,7 @@ Payload CMS uses SQLite (`@payloadcms/db-sqlite`). The DB path is controlled by 
 |-------------|-------------------------------------|
 | Dev         | `.cache/data/dashboard/cc.db`       |
 | Test (E2E)  | `.cache/cc-test-<timestamp>/cc.db`  |
-| RC          | `~/www/rc-cc/data/cc.db`            |
+| RC          | `~/www/rccc/data/cc.db`            |
 | Production  | `~/www/cc/data/cc.db`               |
 
 ### Migrations
@@ -76,18 +76,18 @@ pnpm deploy:rc staging    # deploy a different branch to RC
 
 This runs `scripts/deploy-rc.sh` which:
 
-1. Clones the repo to `~/www/rc-cc/` (first run only)
+1. Clones the repo to `~/www/rccc/` (first run only)
 2. Checks out the target branch and pulls latest
 3. Installs dependencies and builds
 4. Pushes database schema from source (fresh DBs only)
 5. Installs the launchd plist (first run only)
-6. Restarts the `com.gatocube.rc-cc` service
+6. Restarts the `com.gatocube.rccc` service
 7. Waits for the server to become healthy (HTTP 200)
 8. Runs smoke tests (`all-pages.spec.ts`) against `http://127.0.0.1:3232` -- fails the deploy if tests fail
 
 After deploying, the RC is available at **https://rccc.gatocube.com** (local: `http://127.0.0.1:3232`).
 
-RC uses its own SQLite database at `~/www/rc-cc/data/cc.db`, fully isolated from production.
+RC uses its own SQLite database at `~/www/rccc/data/cc.db`, fully isolated from production.
 
 To run the smoke tests independently (without redeploying):
 
@@ -159,13 +159,13 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gatocube.cc.plist
 The `pnpm deploy:rc` script installs the plist automatically on first run. To install manually:
 
 ```bash
-cp scripts/com.gatocube.rc-cc.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gatocube.rc-cc.plist
+cp scripts/com.gatocube.rccc.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gatocube.rccc.plist
 ```
 
 ### Manage services
 
-Replace `LABEL` with `com.gatocube.cc` (production) or `com.gatocube.rc-cc` (RC):
+Replace `LABEL` with `com.gatocube.cc` (production) or `com.gatocube.rccc` (RC):
 
 ```bash
 # status
